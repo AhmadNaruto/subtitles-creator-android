@@ -126,6 +126,7 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
         pstate.jcb = env->NewGlobalRef(progressCb);
         jclass cbCls = env->GetObjectClass(progressCb);
         pstate.onProg = env->GetMethodID(cbCls, "onProgress", "(I)V");
+        env->DeleteLocalRef(cbCls);
         p.progress_callback = progress_cb;
         p.progress_callback_user_data = &pstate;
     }
@@ -159,10 +160,19 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
         int64_t t0 = whisper_full_get_segment_t0(ctx, i) * 10;
         int64_t t1 = whisper_full_get_segment_t1(ctx, i) * 10;
 
-        env->SetObjectArrayElement(arr, i * 3 + 0, env->NewStringUTF(txt));
-        env->SetObjectArrayElement(arr, i * 3 + 1, env->NewStringUTF(std::to_string(t0).c_str()));
-        env->SetObjectArrayElement(arr, i * 3 + 2, env->NewStringUTF(std::to_string(t1).c_str()));
+        jstring jTxt = env->NewStringUTF(txt ? txt : "");
+        jstring jT0  = env->NewStringUTF(std::to_string(t0).c_str());
+        jstring jT1  = env->NewStringUTF(std::to_string(t1).c_str());
+
+        env->SetObjectArrayElement(arr, i * 3 + 0, jTxt);
+        env->SetObjectArrayElement(arr, i * 3 + 1, jT0);
+        env->SetObjectArrayElement(arr, i * 3 + 2, jT1);
+
+        env->DeleteLocalRef(jTxt);
+        env->DeleteLocalRef(jT0);
+        env->DeleteLocalRef(jT1);
     }
+    env->DeleteLocalRef(strCls);
 
     return arr;
 }

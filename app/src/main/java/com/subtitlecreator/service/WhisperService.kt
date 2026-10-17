@@ -98,12 +98,26 @@ class WhisperService {
             require(numChannels == 1) { "Expected mono WAV, got $numChannels channels" }
             require(bitsPerSample == 16) { "Expected PCM16, got $bitsPerSample bps" }
 
-            val dataSize = (raf.length() - 44).toInt()
-            val bytes = ByteArray(dataSize)
-            raf.readFully(bytes)
-            val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            val out = FloatArray(dataSize / 2)
-            for (i in out.indices) out[i] = buf.short.toFloat() / 32768f
+            val totalBytes = (raf.length() - 44).toInt()
+            val totalSamples = totalBytes / 2
+            val out = FloatArray(totalSamples)
+
+            // Stream decode with small 32KB buffer to prevent heap memory exhaustion on long videos
+            val chunkBytes = ByteArray(32768)
+            val chunkBuffer = ByteBuffer.wrap(chunkBytes).order(ByteOrder.LITTLE_ENDIAN)
+            var sampleIdx = 0
+            var remaining = totalBytes
+
+            while (remaining > 0) {
+                val toRead = minOf(remaining, chunkBytes.size)
+                raf.readFully(chunkBytes, 0, toRead)
+                chunkBuffer.position(0)
+                val samplesInChunk = toRead / 2
+                for (i in 0 until samplesInChunk) {
+                    out[sampleIdx++] = chunkBuffer.short.toFloat() / 32768f
+                }
+                remaining -= toRead
+            }
             return out
         }
     }

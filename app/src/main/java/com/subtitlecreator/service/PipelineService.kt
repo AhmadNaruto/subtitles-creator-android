@@ -160,6 +160,9 @@ class PipelineService : Service() {
                     }
                 )
 
+                // Cleanup temporary WAV to free up storage
+                runCatching { if (wav.exists()) wav.delete() }
+
                 PipelineStore.update {
                     it.copy(
                         transcribing = false,

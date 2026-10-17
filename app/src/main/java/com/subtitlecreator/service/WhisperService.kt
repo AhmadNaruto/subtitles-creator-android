@@ -22,11 +22,16 @@ import java.nio.ByteOrder
 class WhisperService {
 
     private var ctxPtr: Long = 0L
+    private var loadedModelPath: String? = null
 
     fun ensureLoaded(modelFile: File) {
-        if (ctxPtr != 0L) return
+        if (ctxPtr != 0L && loadedModelPath == modelFile.absolutePath) return
+        if (ctxPtr != 0L) {
+            release()
+        }
         require(modelFile.exists()) { "Model file missing: ${modelFile.absolutePath}" }
         ctxPtr = WhisperLib.init(modelFile.absolutePath)
+        loadedModelPath = modelFile.absolutePath
         Log.i(TAG, "Loaded: ${modelFile.name} (${modelFile.length() / 1024 / 1024} MB)")
     }
 
@@ -34,6 +39,7 @@ class WhisperService {
         if (ctxPtr != 0L) {
             WhisperLib.free(ctxPtr)
             ctxPtr = 0L
+            loadedModelPath = null
         }
     }
 

@@ -18,6 +18,8 @@ object PipelineStore {
 
     data class UiState(
         val modelReady: Boolean = false,
+        val selectedModelId: String = "base-q5_1",
+        val downloadedModelIds: Set<String> = emptySet(),
         val modelDownloadMb: Int = 0,
         val modelTotalMb: Int = 0,
         val videoFile: File? = null,

@@ -49,7 +49,7 @@ class PipelineService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat("Ready", 0)
         when (intent?.action) {
-            ACTION_DOWNLOAD  -> startDownload()
+            ACTION_DOWNLOAD  -> startDownload(intent.getStringExtra(EXTRA_MODEL_ID))
             ACTION_TRANSCRIBE -> startTranscribe(intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn())
             ACTION_EXPORT     -> startExport(intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn())
             ACTION_CANCEL     -> cancelActive()
@@ -68,21 +68,30 @@ class PipelineService : Service() {
 
     // --- operations -------------------------------------------------------
 
-    private fun startDownload() {
+    private fun startDownload(modelId: String? = null) {
         if (activeJob?.isActive == true) return
         activeJob = scope.launch {
             acquireWakeLock()
             try {
-                updateNotification("Downloading Whisper model…", 0)
-                modelDl.download { done, total ->
+                val targetId = modelId ?: PipelineStore.current().selectedModelId
+                val spec = modelDl.getModelById(targetId)
+                updateNotification("Downloading ${spec.displayName}…", 0)
+                modelDl.download(spec) { done, total ->
                     PipelineStore.update { it.copy(modelDownloadMb = done, modelTotalMb = total) }
                     val pct = if (total > 0) (done * 100 / total) else 0
-                    updateNotification("Downloading model $done / $total MB", pct)
+                    updateNotification("Downloading ${spec.displayName} $done / $total MB", pct)
                 }
-                PipelineStore.update { it.copy(modelReady = true) }
+                PipelineStore.update {
+                    it.copy(
+                        modelReady = true,
+                        downloadedModelIds = modelDl.getDownloadedModelIds(),
+                        modelDownloadMb = 0,
+                        modelTotalMb = 0
+                    )
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "download failed", t)
-                PipelineStore.update { it.copy(error = "Model download failed: ${t.message}") }
+                PipelineStore.update { it.copy(error = "Model download failed: ${t.message}", modelDownloadMb = 0, modelTotalMb = 0) }
             } finally {
                 releaseWakeLock()
                 stopSelf()
@@ -99,12 +108,14 @@ class PipelineService : Service() {
                 updateNotification("Extracting audio…", 0)
 
                 val video = File(videoPath)
-                whisper.ensureLoaded(modelDl.modelFile())
+                val spec = modelDl.getModelById(PipelineStore.current().selectedModelId)
+                whisper.ensureLoaded(modelDl.modelFile(spec))
                 val wav = File(video.parentFile, video.nameWithoutExtension + ".wav")
                 ffmpeg.extractAudio16kMono(video, wav)
 
                 updateNotification("Transcribing on-device…", 0)
-                val result = whisper.transcribe(wav, language = "auto", nThreads = 8) { p ->
+                // 6 threads balances performance and battery efficiency on mobile
+                val result = whisper.transcribe(wav, language = "auto", nThreads = 6) { p ->
                     PipelineStore.update { it.copy(transcribeProgress = p) }
                     updateNotification("Transcribing $p%", p)
                 }
@@ -240,5 +251,6 @@ class PipelineService : Service() {
         const val ACTION_EXPORT = "com.subtitlecreator.ACTION_EXPORT"
         const val ACTION_CANCEL = "com.subtitlecreator.ACTION_CANCEL"
         const val EXTRA_VIDEO_PATH = "videoPath"
+        const val EXTRA_MODEL_ID = "modelId"
     }
 }

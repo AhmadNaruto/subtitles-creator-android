@@ -28,13 +28,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<PipelineStore.UiState> = PipelineStore.state
 
     init {
-        if (modelDl.isDownloaded()) {
-            PipelineStore.update { it.copy(modelReady = true) }
+        refreshModelStatus()
+    }
+
+    fun refreshModelStatus() {
+        val curId = PipelineStore.current().selectedModelId
+        val spec = modelDl.getModelById(curId)
+        val downloaded = modelDl.getDownloadedModelIds()
+        PipelineStore.update {
+            it.copy(
+                modelReady = modelDl.isDownloaded(spec),
+                downloadedModelIds = downloaded
+            )
         }
     }
 
-    fun downloadModel() {
-        startService(PipelineService.ACTION_DOWNLOAD)
+    fun selectModel(modelId: String) {
+        val spec = modelDl.getModelById(modelId)
+        val isReady = modelDl.isDownloaded(spec)
+        PipelineStore.update {
+            it.copy(
+                selectedModelId = modelId,
+                modelReady = isReady,
+                downloadedModelIds = modelDl.getDownloadedModelIds()
+            )
+        }
+    }
+
+    fun downloadModel(modelId: String? = null) {
+        val target = modelId ?: state.value.selectedModelId
+        startService(action = PipelineService.ACTION_DOWNLOAD, modelId = target)
     }
 
     fun onVideoPicked(uri: Uri) {
@@ -111,11 +134,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() = PipelineStore.update { it.copy(error = null) }
 
-    private fun startService(action: String, videoPath: String? = null) {
+    private fun startService(action: String, videoPath: String? = null, modelId: String? = null) {
         val app = getApplication<Application>()
         val intent = Intent(app, PipelineService::class.java).apply {
             this.action = action
             videoPath?.let { putExtra(PipelineService.EXTRA_VIDEO_PATH, it) }
+            modelId?.let { putExtra(PipelineService.EXTRA_MODEL_ID, it) }
         }
         ContextCompat.startForegroundService(app, intent)
     }

@@ -30,10 +30,8 @@ class ModelDownloadService(private val context: Context) {
         .readTimeout(10, TimeUnit.MINUTES)
         .build()
 
-    // small Q5 is ~3-4x faster than large-v3-turbo Q5 on CPU and produces very
-    // usable subtitles in French/English. Switch to LARGE_V3_TURBO_Q5 for peak
-    // accuracy once you're comfortable with transcription times on-device.
-    val defaultModel: ModelSpec = SMALL_Q5
+    // base Q5 is recommended default for mobile: very fast, light (~57 MB), and accurate enough.
+    val defaultModel: ModelSpec = BASE_Q5
 
     fun modelsDir(): File = File(context.filesDir, "models").apply { mkdirs() }
 
@@ -42,6 +40,14 @@ class ModelDownloadService(private val context: Context) {
     fun isDownloaded(spec: ModelSpec = defaultModel): Boolean {
         val f = modelFile(spec)
         return f.exists() && f.length() > spec.sizeMb * 900_000L // rough sanity check
+    }
+
+    fun getModelById(id: String): ModelSpec {
+        return ALL_MODELS.firstOrNull { it.id == id } ?: defaultModel
+    }
+
+    fun getDownloadedModelIds(): Set<String> {
+        return ALL_MODELS.filter { isDownloaded(it) }.map { it.id }.toSet()
     }
 
     suspend fun download(
@@ -88,14 +94,34 @@ class ModelDownloadService(private val context: Context) {
     companion object {
         private const val TAG = "ModelDownload"
 
-        val LARGE_V3_TURBO_Q5 = ModelSpec(
-            id = "large-v3-turbo-q5",
-            displayName = "Whisper large-v3-turbo (Q5_0, ~574 MB)",
-            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-            sizeMb = 574,
-            fileName = "ggml-large-v3-turbo-q5_0.bin"
+        // 1. Ultra lightweight & fastest — best for lower-end phones
+        val TINY_Q5 = ModelSpec(
+            id = "tiny-q5_1",
+            displayName = "Whisper tiny (Q5_1, ~31 MB)",
+            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
+            sizeMb = 31,
+            fileName = "ggml-tiny-q5_1.bin"
         )
 
+        // 2. Recommended default — fast & great balance for mobile
+        val BASE_Q5 = ModelSpec(
+            id = "base-q5_1",
+            displayName = "Whisper base (Q5_1, ~57 MB)",
+            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
+            sizeMb = 57,
+            fileName = "ggml-base-q5_1.bin"
+        )
+
+        // 3. High quality
+        val SMALL_Q5 = ModelSpec(
+            id = "small-q5_1",
+            displayName = "Whisper small (Q5_1, ~182 MB)",
+            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+            sizeMb = 182,
+            fileName = "ggml-small-q5_1.bin"
+        )
+
+        // 4. Very high precision
         val MEDIUM_Q5 = ModelSpec(
             id = "medium-q5",
             displayName = "Whisper medium (Q5_0, ~515 MB)",
@@ -104,13 +130,21 @@ class ModelDownloadService(private val context: Context) {
             fileName = "ggml-medium-q5_0.bin"
         )
 
-        // HF hosts q5_1 (not q5_0) for the small model — both quantizations are on par.
-        val SMALL_Q5 = ModelSpec(
-            id = "small-q5_1",
-            displayName = "Whisper small (Q5_1, ~182 MB)",
-            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
-            sizeMb = 182,
-            fileName = "ggml-small-q5_1.bin"
+        // 5. Peak accuracy for flagship devices
+        val LARGE_V3_TURBO_Q5 = ModelSpec(
+            id = "large-v3-turbo-q5",
+            displayName = "Whisper large-v3-turbo (Q5_0, ~574 MB)",
+            url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+            sizeMb = 574,
+            fileName = "ggml-large-v3-turbo-q5_0.bin"
+        )
+
+        val ALL_MODELS = listOf(
+            TINY_Q5,
+            BASE_Q5,
+            SMALL_Q5,
+            MEDIUM_Q5,
+            LARGE_V3_TURBO_Q5
         )
     }
 }

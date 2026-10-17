@@ -102,7 +102,7 @@ class PipelineService : Service() {
         }
     }
 
-    private fun startTranscribe(videoPath: String) {
+    private fun startTranscribe(videoPath: String, language: String? = null) {
         if (activeJob?.isActive == true) return
         activeJob = scope.launch {
             acquireWakeLock()

@@ -55,6 +55,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun addCustomModel(url: String, name: String? = null) {
+        val spec = modelDl.addCustomModel(url, name)
+        selectModel(spec.id)
+    }
+
+    fun removeCustomModel(id: String) {
+        modelDl.removeCustomModel(id)
+        if (state.value.selectedModelId == id) {
+            selectModel(ModelDownloadService.BASE_Q5.id)
+        } else {
+            refreshModelStatus()
+        }
+    }
+
     fun downloadModel(modelId: String? = null) {
         val target = modelId ?: state.value.selectedModelId
         startService(action = PipelineService.ACTION_DOWNLOAD, modelId = target)

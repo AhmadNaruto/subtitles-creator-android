@@ -71,12 +71,13 @@ object FileUtils {
         }
     }
 
-    /** Format milliseconds into SRT timestamp: HH:MM:SS,mmm */
+    /** Format milliseconds into standard SRT timestamp: HH:MM:SS,mmm */
     fun formatSrtTime(ms: Long): String {
-        val h = ms / 3_600_000
-        val m = (ms % 3_600_000) / 60_000
-        val s = (ms % 60_000) / 1000
-        val millis = ms % 1000
+        val safeMs = maxOf(0L, ms)
+        val h = safeMs / 3_600_000
+        val m = (safeMs % 3_600_000) / 60_000
+        val s = (safeMs % 60_000) / 1000
+        val millis = safeMs % 1000
         return "%02d:%02d:%02d,%03d".format(Locale.US, h, m, s, millis)
     }
 
@@ -89,11 +90,14 @@ object FileUtils {
         val sb = StringBuilder()
 
         if (!groupIntoLines) {
-            subtitles.forEachIndexed { idx, sub ->
+            var idx = 1
+            for (sub in subtitles) {
                 val txt = sub.text.trim()
                 if (txt.isNotEmpty()) {
-                    sb.append(idx + 1).append("\n")
-                    sb.append(formatSrtTime(sub.startMs)).append(" --> ").append(formatSrtTime(sub.endMs)).append("\n")
+                    val start = maxOf(0L, sub.startMs)
+                    val end = maxOf(start + 200L, sub.endMs)
+                    sb.append(idx++).append("\n")
+                    sb.append(formatSrtTime(start)).append(" --> ").append(formatSrtTime(end)).append("\n")
                     sb.append(txt).append("\n\n")
                 }
             }
@@ -105,41 +109,54 @@ object FileUtils {
         var currentStart = -1L
         var currentEnd = -1L
 
+        fun flushBlock() {
+            if (currentWords.isEmpty() || currentStart < 0) return
+            val text = currentWords.joinToString(" ").trim()
+            if (text.isNotEmpty()) {
+                val safeStart = maxOf(0L, currentStart)
+                val safeEnd = maxOf(safeStart + 500L, currentEnd)
+                sb.append(blockIndex++).append("\n")
+                sb.append(formatSrtTime(safeStart)).append(" --> ").append(formatSrtTime(safeEnd)).append("\n")
+                sb.append(text).append("\n\n")
+            }
+            currentWords.clear()
+            currentStart = -1L
+            currentEnd = -1L
+        }
+
         for (sub in subtitles) {
             val text = sub.text.trim()
             if (text.isEmpty()) continue
 
             if (currentStart == -1L) {
-                currentStart = sub.startMs
-                currentEnd = sub.endMs
+                currentStart = maxOf(0L, sub.startMs)
+                currentEnd = maxOf(currentStart + 200L, sub.endMs)
                 currentWords.add(text)
             } else {
                 val gap = sub.startMs - currentEnd
                 val isPunctuationEnd = currentWords.lastOrNull()?.let {
                     it.endsWith(".") || it.endsWith("?") || it.endsWith("!") || it.endsWith(";")
                 } ?: false
+                val totalChars = currentWords.sumOf { it.length } + text.length
 
-                if (gap > 650 || currentWords.size >= 8 || isPunctuationEnd) {
-                    sb.append(blockIndex++).append("\n")
-                    sb.append(formatSrtTime(currentStart)).append(" --> ").append(formatSrtTime(currentEnd)).append("\n")
-                    sb.append(currentWords.joinToString(" ")).append("\n\n")
-
-                    currentWords.clear()
-                    currentStart = sub.startMs
-                    currentEnd = sub.endMs
+                // Break subtitle into a new block if:
+                // - natural pause (> 650 ms)
+                // - sentence end punctuation
+                // - line getting too long (> 8 words or > 40 chars)
+                // - block total duration exceeds 5.5 seconds
+                val blockDuration = sub.endMs - currentStart
+                if (gap > 650 || isPunctuationEnd || currentWords.size >= 8 || totalChars > 42 || blockDuration > 5500) {
+                    flushBlock()
+                    currentStart = maxOf(0L, sub.startMs)
+                    currentEnd = maxOf(currentStart + 200L, sub.endMs)
                     currentWords.add(text)
                 } else {
-                    currentEnd = sub.endMs
+                    currentEnd = maxOf(currentEnd, sub.endMs)
                     currentWords.add(text)
                 }
             }
         }
-
-        if (currentWords.isNotEmpty() && currentStart != -1L) {
-            sb.append(blockIndex).append("\n")
-            sb.append(formatSrtTime(currentStart)).append(" --> ").append(formatSrtTime(currentEnd)).append("\n")
-            sb.append(currentWords.joinToString(" ")).append("\n\n")
-        }
+        flushBlock()
 
         return sb.toString()
     }

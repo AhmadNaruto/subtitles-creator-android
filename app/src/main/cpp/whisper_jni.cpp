@@ -159,6 +159,8 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
         // whisper timestamps are in 10ms units → convert to ms
         int64_t t0 = whisper_full_get_segment_t0(ctx, i) * 10;
         int64_t t1 = whisper_full_get_segment_t1(ctx, i) * 10;
+        if (t0 < 0) t0 = 0;
+        if (t1 <= t0) t1 = t0 + 150;
 
         jstring jTxt = env->NewStringUTF(txt ? txt : "");
         jstring jT0  = env->NewStringUTF(std::to_string(t0).c_str());

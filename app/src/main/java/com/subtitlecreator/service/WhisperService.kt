@@ -75,11 +75,11 @@ class WhisperService {
         // chunk), so the last word before a pause can occupy 5+ seconds of silence.
         // Cap each word's duration to a per-character budget.
         val merged = mergeCompoundFragments(raw)
-        val capped = capWordDurations(merged)
+        val sanitized = sanitizeAndCapTimestamps(merged)
 
         TranscriptionResult(
             language = language,
-            subtitles = capped
+            subtitles = sanitized
         )
     }
 
@@ -130,18 +130,20 @@ class WhisperService {
         if (raw.isEmpty()) return emptyList()
         val out = ArrayList<Subtitle>(raw.size)
         for (seg in raw) {
-            val txt = seg.text
-            val isFragment = txt.isEmpty()
-                || txt.all { !it.isLetterOrDigit() }
+            val txt = seg.text.trim()
+            if (txt.isEmpty() || txt == "[BLANK_AUDIO]" || txt.startsWith("(") && txt.endsWith(")")) {
+                continue
+            }
+            val isFragment = txt.all { !it.isLetterOrDigit() }
                 || txt.startsWith("'")
                 || txt.startsWith("-")
             if (isFragment && out.isNotEmpty()) {
                 val last = out.removeAt(out.size - 1)
                 out += last.copy(
-                    text = (last.text + txt).trim(),
-                    endMs = seg.endMs
+                    text = (last.text + " " + txt).replace("  ", " ").trim(),
+                    endMs = maxOf(last.endMs, seg.endMs)
                 )
-            } else if (txt.isNotEmpty()) {
+            } else {
                 out += Subtitle(text = txt, startMs = seg.startMs, endMs = seg.endMs)
             }
         }
@@ -149,21 +151,49 @@ class WhisperService {
     }
 
     /**
-     * Whisper often stretches a word's `t0` backwards into the preceding silence
-     * (or `t1` forwards, for the last word of a chunk), so a short word can
-     * occupy 5+ seconds of screen time. We trust `t1` (the word's actual end)
-     * and trim the **start** forward so the subtitle only appears during the
-     * word's real speaking window — leading silences stay silent on screen.
-     *
-     * Budget = ~120 ms per char, clamped to [400 ms, 1500 ms].
+     * Fix timing synchronization:
+     * 1. ALWAYS TRUST `startMs` (t0) from Whisper! This is the exact moment speech sounds begin.
+     *    Never shift startMs forward, as doing so causes subtitles to appear noticeably late.
+     * 2. Whisper's `endMs` (t1) frequently stretches across long trailing pauses/silences until
+     *    the next speech chunk. We cap `endMs` so words disappear after reasonable duration
+     *    and never overlap the next spoken word.
+     * 3. Ensure timestamps are strictly valid (startMs < endMs, non-negative).
      */
-    private fun capWordDurations(subs: List<Subtitle>): List<Subtitle> {
-        return subs.map { s ->
-            val budget = (200 + s.text.length * 120).toLong()
-                .coerceIn(400, 1500)
-            val cappedStart = (s.endMs - budget).coerceAtLeast(s.startMs)
-            if (cappedStart > s.startMs) s.copy(startMs = cappedStart) else s
+    private fun sanitizeAndCapTimestamps(subs: List<Subtitle>): List<Subtitle> {
+        if (subs.isEmpty()) return emptyList()
+        val out = ArrayList<Subtitle>(subs.size)
+
+        var lastValidStart = 0L
+
+        for (i in subs.indices) {
+            val cur = subs[i]
+            val text = cur.text.trim()
+            if (text.isEmpty()) continue
+
+            // Ensure startMs is non-negative and monotonically non-decreasing
+            val cleanStart = maxOf(lastValidStart, maxOf(0L, cur.startMs))
+            lastValidStart = cleanStart
+
+            // Maximum natural duration for a single word based on character count
+            val maxWordDuration = (350 + text.length * 100).toLong().coerceIn(600, 2500)
+
+            // Cap endMs to prevent it stretching across 5+ seconds of trailing silence
+            var cleanEnd = minOf(cur.endMs, cleanStart + maxWordDuration)
+
+            // Prevent overlapping with the start of the next spoken word
+            val nextSub = subs.getOrNull(i + 1)
+            if (nextSub != null && nextSub.startMs > cleanStart) {
+                cleanEnd = minOf(cleanEnd, nextSub.startMs)
+            }
+
+            // Guarantee a visible minimum duration of at least 150ms
+            if (cleanEnd <= cleanStart) {
+                cleanEnd = cleanStart + 150L
+            }
+
+            out += Subtitle(text = text, startMs = cleanStart, endMs = cleanEnd)
         }
+        return out
     }
 
     companion object { private const val TAG = "WhisperService" }

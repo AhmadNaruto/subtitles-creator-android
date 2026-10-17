@@ -16,7 +16,9 @@ class FFmpegService(private val context: Context) {
 
     suspend fun extractAudio16kMono(videoIn: File, wavOut: File): File = withContext(Dispatchers.IO) {
         if (wavOut.exists()) wavOut.delete()
-        val cmd = "-y -i \"${videoIn.absolutePath}\" -vn -ac 1 -ar 16000 -c:a pcm_s16le \"${wavOut.absolutePath}\""
+        // Use aresample=async=1000:first_pts=0 to ensure the audio timeline precisely
+        // aligns with video presentation timestamps (PTS=0) and prevents drift over long videos (10+ min).
+        val cmd = "-y -i \"${videoIn.absolutePath}\" -vn -af \"aresample=async=1000:first_pts=0\" -ac 1 -ar 16000 -c:a pcm_s16le \"${wavOut.absolutePath}\""
         val session = FFmpegKit.execute(cmd)
         check(ReturnCode.isSuccess(session.returnCode)) {
             "FFmpeg extract failed rc=${session.returnCode}\n${session.allLogsAsString}"

@@ -145,9 +145,38 @@ class SubtitleBurner(private val context: Context) {
             )
         }
 
+        private var pointerIndex = 0
+
         override fun getBitmap(presentationTimeUs: Long): Bitmap {
+            if (subs.isEmpty()) return emptyBitmap
             val ms = presentationTimeUs / 1000L
-            val sub = subs.firstOrNull { ms in it.startMs..it.endMs }
+
+            // O(1) fast-path tracking: time increases monotonically during video export
+            var sub: Subtitle? = null
+            if (pointerIndex in subs.indices && ms in subs[pointerIndex].startMs..subs[pointerIndex].endMs) {
+                sub = subs[pointerIndex]
+            } else {
+                while (pointerIndex < subs.size && ms > subs[pointerIndex].endMs) {
+                    pointerIndex++
+                }
+                if (pointerIndex in subs.indices && ms in subs[pointerIndex].startMs..subs[pointerIndex].endMs) {
+                    sub = subs[pointerIndex]
+                } else if (pointerIndex >= subs.size || (pointerIndex > 0 && ms < subs[pointerIndex].startMs)) {
+                    // Fallback to binary search if seeked backward or out of bounds
+                    val found = subs.binarySearch { s ->
+                        when {
+                            ms < s.startMs -> 1
+                            ms > s.endMs -> -1
+                            else -> 0
+                        }
+                    }
+                    if (found >= 0) {
+                        pointerIndex = found
+                        sub = subs[found]
+                    }
+                }
+            }
+
             val text = sub?.text?.trim().orEmpty()
             if (text.isEmpty()) return emptyBitmap
 

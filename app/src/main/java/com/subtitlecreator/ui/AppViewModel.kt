@@ -93,9 +93,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setSourceLanguage(lang: String) {
+        PipelineStore.update { it.copy(sourceLanguage = lang) }
+    }
+
     fun startTranscription() {
         val video = state.value.videoFile ?: return
-        startService(PipelineService.ACTION_TRANSCRIBE, video.absolutePath)
+        startService(
+            action = PipelineService.ACTION_TRANSCRIBE,
+            videoPath = video.absolutePath,
+            language = state.value.sourceLanguage
+        )
     }
 
     fun updateSubtitle(index: Int, text: String? = null, startMs: Long? = null, endMs: Long? = null) {
@@ -181,12 +189,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() = PipelineStore.update { it.copy(error = null) }
 
-    private fun startService(action: String, videoPath: String? = null, modelId: String? = null) {
+    private fun startService(
+        action: String,
+        videoPath: String? = null,
+        modelId: String? = null,
+        language: String? = null
+    ) {
         val app = getApplication<Application>()
         val intent = Intent(app, PipelineService::class.java).apply {
             this.action = action
             videoPath?.let { putExtra(PipelineService.EXTRA_VIDEO_PATH, it) }
             modelId?.let { putExtra(PipelineService.EXTRA_MODEL_ID, it) }
+            language?.let { putExtra(PipelineService.EXTRA_LANGUAGE, it) }
         }
         ContextCompat.startForegroundService(app, intent)
     }

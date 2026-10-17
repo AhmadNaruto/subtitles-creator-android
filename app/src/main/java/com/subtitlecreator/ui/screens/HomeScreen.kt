@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -170,6 +171,55 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (state.videoFile == null) "Pilih Video dari Galeri" else "Ganti Video")
+                }
+            }
+        }
+
+        // 3. Language Selector Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Bahasa Audio Sumber",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Memilih bahasa secara manual membuat transkripsi lebih cepat (~20%) dan mencegah halusinasi deteksi bahasa.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                val languages = listOf(
+                    "auto" to "🌐 Otomatis",
+                    "id" to "🇮🇩 Indonesia",
+                    "en" to "🇬🇧 English",
+                    "ja" to "🇯🇵 日本語",
+                    "ar" to "🇸🇦 العربية",
+                    "ko" to "🇰🇷 한국어",
+                    "zh" to "🇨🇳 中文",
+                    "ms" to "🇲🇾 Melayu",
+                    "es" to "🇪🇸 Español",
+                    "fr" to "🇫🇷 Français",
+                    "de" to "🇩🇪 Deutsch",
+                    "ru" to "🇷🇺 Русский"
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    languages.forEach { (code, label) ->
+                        FilterChip(
+                            selected = state.sourceLanguage == code,
+                            onClick = { vm.setSourceLanguage(code) },
+                            label = { Text(label) }
+                        )
+                    }
                 }
             }
         }

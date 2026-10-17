@@ -50,7 +50,10 @@ class PipelineService : Service() {
         startForegroundCompat("Ready", 0)
         when (intent?.action) {
             ACTION_DOWNLOAD  -> startDownload(intent.getStringExtra(EXTRA_MODEL_ID))
-            ACTION_TRANSCRIBE -> startTranscribe(intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn())
+            ACTION_TRANSCRIBE -> startTranscribe(
+                videoPath = intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn(),
+                language = intent.getStringExtra(EXTRA_LANGUAGE)
+            )
             ACTION_EXPORT     -> startExport(intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn())
             ACTION_CANCEL     -> cancelActive()
         }
@@ -141,11 +144,21 @@ class PipelineService : Service() {
                 }
                 updateNotification("Mentranskripsi dengan Whisper AI…", 0)
 
-                // 6 threads balances performance and battery efficiency on mobile
+                // Adaptive CPU threading based on device cores
+                val cpuCores = Runtime.getRuntime().availableProcessors()
+                val optimalThreads = when {
+                    cpuCores >= 8 -> 6 // 4-6 Performance cores on flagship SoCs
+                    cpuCores in 6..7 -> 4
+                    cpuCores in 4..5 -> (cpuCores - 1).coerceAtLeast(2)
+                    else -> 2
+                }
+
+                val chosenLang = language ?: PipelineStore.current().sourceLanguage
+
                 val result = whisper.transcribe(
                     wav16kMono = wav,
-                    language = "auto",
-                    nThreads = 6,
+                    language = chosenLang,
+                    nThreads = optimalThreads,
                     onStatusUpdate = { status ->
                         PipelineStore.update { it.copy(transcribeDetail = status) }
                     },
@@ -307,5 +320,6 @@ class PipelineService : Service() {
         const val ACTION_CANCEL = "com.subtitlecreator.ACTION_CANCEL"
         const val EXTRA_VIDEO_PATH = "videoPath"
         const val EXTRA_MODEL_ID = "modelId"
+        const val EXTRA_LANGUAGE = "language"
     }
 }

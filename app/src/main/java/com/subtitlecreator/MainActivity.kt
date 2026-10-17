@@ -73,11 +73,20 @@ fun AppNav(vm: AppViewModel) {
             })
         }
         composable(Routes.TRANSCRIBING) {
-            TranscribingScreen(state = state, onDone = {
-                nav.navigate(Routes.EDITOR) {
-                    popUpTo(Routes.HOME) { inclusive = false }
+            TranscribingScreen(
+                state = state,
+                onDone = {
+                    nav.navigate(Routes.EDITOR) {
+                        popUpTo(Routes.HOME) { inclusive = false }
+                    }
+                },
+                onCancel = {
+                    vm.cancel()
+                    nav.navigate(Routes.HOME) {
+                        popUpTo(Routes.HOME) { inclusive = true }
+                    }
                 }
-            })
+            )
         }
         composable(Routes.EDITOR) {
             EditorScreen(state = state, vm = vm, onExport = {

@@ -47,12 +47,19 @@ class WhisperService {
         wav16kMono: File,
         language: String = "auto",
         nThreads: Int = 6,
+        onStatusUpdate: (String) -> Unit = {},
         onProgress: (Int) -> Unit = {}
     ): TranscriptionResult = withContext(Dispatchers.Default) {
         check(ctxPtr != 0L) { "Model not loaded — call ensureLoaded() first" }
 
+        onStatusUpdate("Membaca & decode data audio WAV...")
         val pcm = readWavPcmFloat(wav16kMono)
-        Log.i(TAG, "Decoded ${pcm.size} samples (${pcm.size / 16000.0}s)")
+        val totalSec = (pcm.size / 16000.0).toInt()
+        val min = totalSec / 60
+        val sec = totalSec % 60
+        val durStr = if (min > 0) "${min}m ${sec}s" else "${sec}s"
+        Log.i(TAG, "Decoded ${pcm.size} samples ($durStr)")
+        onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
 
         val raw = WhisperLib.transcribe(
             ctxPtr = ctxPtr,

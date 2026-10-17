@@ -104,28 +104,80 @@ class PipelineService : Service() {
         activeJob = scope.launch {
             acquireWakeLock()
             try {
-                PipelineStore.update { it.copy(transcribing = true, transcribeProgress = 0, error = null) }
-                updateNotification("Extracting audio…", 0)
-
                 val video = File(videoPath)
                 val spec = modelDl.getModelById(PipelineStore.current().selectedModelId)
-                whisper.ensureLoaded(modelDl.modelFile(spec))
+
+                // Tahap 1: Ekstraksi Audio
+                PipelineStore.update {
+                    it.copy(
+                        transcribing = true,
+                        transcribeProgress = 0,
+                        transcribeStage = "Tahap 1/3: Mengekstrak Audio",
+                        transcribeDetail = "Membaca video dan mengekstrak audio ke 16kHz PCM (FFmpeg)...",
+                        error = null
+                    )
+                }
+                updateNotification("Mengekstrak audio video…", 0)
+
                 val wav = File(video.parentFile, video.nameWithoutExtension + ".wav")
                 ffmpeg.extractAudio16kMono(video, wav)
 
-                updateNotification("Transcribing on-device…", 0)
-                // 6 threads balances performance and battery efficiency on mobile
-                val result = whisper.transcribe(wav, language = "auto", nThreads = 6) { p ->
-                    PipelineStore.update { it.copy(transcribeProgress = p) }
-                    updateNotification("Transcribing $p%", p)
-                }
+                // Tahap 2: Memuat Model
                 PipelineStore.update {
-                    it.copy(transcribing = false, subtitles = result.subtitles, transcribeProgress = 100)
+                    it.copy(
+                        transcribeStage = "Tahap 2/3: Memuat Model Whisper",
+                        transcribeDetail = "Memuat ${spec.displayName} ke memori RAM..."
+                    )
                 }
-                updateNotification("Transcription done", 100)
+                updateNotification("Memuat model Whisper…", 0)
+                whisper.ensureLoaded(modelDl.modelFile(spec))
+
+                // Tahap 3: Transkripsi AI
+                PipelineStore.update {
+                    it.copy(
+                        transcribeStage = "Tahap 3/3: Transkripsi Whisper AI",
+                        transcribeDetail = "Menjalankan neural network Whisper di CPU..."
+                    )
+                }
+                updateNotification("Mentranskripsi dengan Whisper AI…", 0)
+
+                // 6 threads balances performance and battery efficiency on mobile
+                val result = whisper.transcribe(
+                    wav16kMono = wav,
+                    language = "auto",
+                    nThreads = 6,
+                    onStatusUpdate = { status ->
+                        PipelineStore.update { it.copy(transcribeDetail = status) }
+                    },
+                    onProgress = { p ->
+                        PipelineStore.update {
+                            it.copy(
+                                transcribeProgress = p,
+                                transcribeDetail = "Memproses transkripsi: $p% selesai"
+                            )
+                        }
+                        updateNotification("Mentranskripsi: $p%", p)
+                    }
+                )
+
+                PipelineStore.update {
+                    it.copy(
+                        transcribing = false,
+                        subtitles = result.subtitles,
+                        transcribeProgress = 100,
+                        transcribeStage = "Selesai",
+                        transcribeDetail = "Transkripsi berhasil dibuat!"
+                    )
+                }
+                updateNotification("Transkripsi selesai!", 100)
             } catch (t: Throwable) {
                 Log.e(TAG, "transcribe failed", t)
-                PipelineStore.update { it.copy(transcribing = false, error = "Transcription failed: ${t.message}") }
+                PipelineStore.update {
+                    it.copy(
+                        transcribing = false,
+                        error = "Gagal transkripsi: ${t.message}"
+                    )
+                }
             } finally {
                 releaseWakeLock()
                 stopSelf()

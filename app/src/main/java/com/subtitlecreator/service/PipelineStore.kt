@@ -26,6 +26,8 @@ object PipelineStore {
         val videoWidthPx: Int = 1920,
         val videoHeightPx: Int = 1080,
         val transcribeProgress: Int = 0,
+        val transcribeStage: String = "",
+        val transcribeDetail: String = "",
         val transcribing: Boolean = false,
         val subtitles: List<Subtitle> = emptyList(),
         val exporting: Boolean = false,

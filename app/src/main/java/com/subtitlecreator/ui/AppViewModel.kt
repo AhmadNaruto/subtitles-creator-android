@@ -24,6 +24,7 @@ typealias UiState = PipelineStore.UiState
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val modelDl = ModelDownloadService(app)
+    val translator = com.subtitlecreator.service.TranslationService()
 
     val state: StateFlow<PipelineStore.UiState> = PipelineStore.state
 
@@ -125,6 +126,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val start = prev?.endMs ?: 0L
             list.add(afterIndex + 1, Subtitle("new", start, start + 800))
             s.copy(subtitles = list)
+        }
+    }
+
+    fun translateSubtitles(targetLang: String, onDone: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        val currentSubs = state.value.subtitles
+        if (currentSubs.isEmpty()) return
+
+        viewModelScope.launch {
+            PipelineStore.update {
+                it.copy(
+                    isTranslating = true,
+                    translationProgress = 0,
+                    translationTotal = currentSubs.size
+                )
+            }
+            try {
+                val translated = translator.translateSubtitles(currentSubs, targetLang) { current, total ->
+                    PipelineStore.update {
+                        it.copy(translationProgress = current, translationTotal = total)
+                    }
+                }
+                PipelineStore.update {
+                    it.copy(
+                        subtitles = translated,
+                        isTranslating = false
+                    )
+                }
+                onDone()
+            } catch (t: Throwable) {
+                PipelineStore.update { it.copy(isTranslating = false) }
+                onError(t.message ?: "Gagal menerjemahkan subtitle")
+            }
         }
     }
 

@@ -3,17 +3,21 @@ package com.subtitlecreator.ui.screens
 import android.graphics.Typeface as AndroidTypeface
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +42,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.subtitlecreator.model.Subtitle
 import com.subtitlecreator.service.PipelineStore
+import com.subtitlecreator.service.TranslationService
 import com.subtitlecreator.ui.AppViewModel
+import com.subtitlecreator.util.FileUtils
 import kotlinx.coroutines.delay
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -49,6 +55,8 @@ fun EditorScreen(
     onExport: () -> Unit
 ) {
     val context = LocalContext.current
+    var showTranslateDialog by remember { mutableStateOf(false) }
+
     val player = remember(state.videoFile) {
         ExoPlayer.Builder(context).build().apply {
             state.videoFile?.let {
@@ -73,164 +81,161 @@ fun EditorScreen(
 
     val listState = rememberLazyListState()
     LaunchedEffect(activeIndex) {
-        if (activeIndex >= 0) listState.animateScrollToItem(activeIndex.coerceAtMost(state.subtitles.lastIndex))
+        if (activeIndex >= 0) listState.animateScrollToItem(activeIndex)
     }
 
-    // Montserrat Bold loaded from assets so the preview uses the exact same typeface as the burn.
-    val montserratFamily = remember(context) {
-        runCatching {
-            FontFamily(AndroidTypeface.createFromAsset(context.assets, "fonts/Montserrat-Bold.ttf"))
-        }.getOrDefault(FontFamily.Default)
-    }
-    val density = LocalDensity.current
-    val videoAspect = remember(state.videoWidthPx, state.videoHeightPx) {
-        (state.videoWidthPx.toFloat() / state.videoHeightPx.coerceAtLeast(1)).coerceIn(0.3f, 3f)
+    val montserratFamily = remember {
+        val tf = runCatching { AndroidTypeface.createFromAsset(context.assets, "fonts/Montserrat-Bold.ttf") }
+            .getOrElse { AndroidTypeface.DEFAULT_BOLD }
+        FontFamily(androidx.compose.ui.text.font.Typeface(tf))
     }
 
-    Column(Modifier.fillMaxSize()) {
-        // Outer container: centers the preview and caps its height so portrait videos don't
-        // swallow the whole screen. The inner Box keeps the TRUE video aspect so the subtitle
-        // overlay maps 1:1 to the burned frame.
-        BoxWithConstraints(Modifier.fillMaxWidth().background(Color.Black)) {
-            val maxPreviewH = 360.dp
-            val naturalH = maxWidth / videoAspect
-            val previewH = if (naturalH <= maxPreviewH) naturalH else maxPreviewH
-            val previewW = if (naturalH <= maxPreviewH) maxWidth else maxPreviewH * videoAspect
-        BoxWithConstraints(
-            Modifier
-                .size(previewW, previewH)
-                .align(Alignment.Center)
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Video Preview Player Box
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.48f)
                 .background(Color.Black)
         ) {
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = {
-                    PlayerView(it).apply {
-                        useController = true
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
                         this.player = player
+                        useController = true
                     }
-                }
+                },
+                modifier = Modifier.fillMaxSize()
             )
 
-            // Live subtitle overlay — mirrors SubtitleBurner exactly (font, size, colour, shadow,
-            // top anchor). The user can drag it vertically; the chosen position is what the
-            // export uses verbatim.
-            val boxWidthPx = with(density) { maxWidth.toPx() }
-            val boxHeightPx = with(density) { maxHeight.toPx() }
-            val videoW = state.videoWidthPx.coerceAtLeast(1).toFloat()
-            val scale = boxWidthPx / videoW            // preview-px per video-px
-            val burnPx = state.subtitleFontSize * 2f   // same multiplier as PipelineService
-            val displayedSp = with(density) { (burnPx * scale).toSp() }
-            val shadowBlurPx = burnPx * 0.10f * scale
-            val shadowOffsetX = burnPx * 0.035f * scale
-            val shadowOffsetY = burnPx * 0.065f * scale
+            // Dynamic Subtitle Overlay
+            if (activeText.isNotEmpty()) {
+                val density = LocalDensity.current
+                val fontSizeSp = (state.subtitleFontSize * 0.35f).coerceIn(14f, 56f).sp
+                val shadowRadiusPx = with(density) { (fontSizeSp * 0.10f).toPx() }
+                val shadowDxPx = with(density) { (fontSizeSp * 0.035f).toPx() }
+                val shadowDyPx = with(density) { (fontSizeSp * 0.065f).toPx() }
+                val shadowBlurPx = shadowRadiusPx.coerceAtLeast(1f)
 
-            // Show the active word; when silent, dim the last-seen word so the user always has
-            // something to grab. Before any word has played, fall back to the first subtitle.
-            val lastIdx = remember { mutableIntStateOf(-1) }
-            LaunchedEffect(activeIndex) { if (activeIndex >= 0) lastIdx.intValue = activeIndex }
-            val displayIdx = when {
-                activeIndex >= 0 -> activeIndex
-                lastIdx.intValue >= 0 -> lastIdx.intValue
-                else -> 0
-            }
-            val displayText = state.subtitles.getOrNull(displayIdx)?.text.orEmpty()
-            val ghost = activeIndex < 0
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val boxHeightPx = with(density) { maxHeight.toPx() }
+                    val yOffset = with(density) {
+                        (boxHeightPx * state.subtitlePositionFraction).toDp()
+                    }
 
-            if (displayText.isNotBlank()) {
-                val yOffset = maxHeight * state.subtitlePositionFraction
-                Text(
-                    text = displayText,
-                    color = Color(0xFFFFD400).let { if (ghost) it.copy(alpha = 0.45f) else it },
-                    style = TextStyle(
+                    Text(
+                        text = activeText,
+                        color = Color(0xFF, 0xD4, 0x00), // yellow
                         fontFamily = montserratFamily,
-                        fontSize = displayedSp,
                         fontWeight = FontWeight.Bold,
+                        fontSize = fontSizeSp,
                         textAlign = TextAlign.Center,
-                        shadow = Shadow(
-                            color = Color(0x80000000),
-                            offset = Offset(shadowOffsetX, shadowOffsetY),
-                            blurRadius = shadowBlurPx
+                        style = TextStyle(
+                            shadow = Shadow(
+                                color = Color(0, 0, 0, 128),
+                                offset = Offset(shadowDxPx, shadowDyPx),
+                                blurRadius = shadowBlurPx
+                            ),
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
                         ),
-                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                    ),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = yOffset)
-                        .padding(horizontal = 8.dp)
-                        .pointerInput(boxHeightPx) {
-                            detectVerticalDragGestures { change, dy ->
-                                change.consume()
-                                val cur = PipelineStore.current().subtitlePositionFraction
-                                vm.setSubtitlePosition(cur + dy / boxHeightPx)
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .offset(y = yOffset)
+                            .padding(horizontal = 8.dp)
+                            .pointerInput(boxHeightPx) {
+                                detectVerticalDragGestures { change, dy ->
+                                    change.consume()
+                                    val cur = PipelineStore.current().subtitlePositionFraction
+                                    vm.setSubtitlePosition(cur + dy / boxHeightPx)
+                                }
                             }
-                        }
-                )
+                    )
+                }
             }
         }
-        }
 
+        // Action Toolbar
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 "${state.subtitles.size} kata",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
+
+            // Tombol Terjemahkan
+            OutlinedButton(
+                onClick = { showTranslateDialog = true },
+                enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
+                contentPadding = PaddingValues(horizontal = 10.dp)
+            ) {
+                Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Translate", style = MaterialTheme.typography.labelMedium)
+            }
 
             // Tombol Simpan .SRT Langsung
             OutlinedButton(
                 onClick = {
                     val baseName = state.videoFile?.name ?: "subtitle_${System.currentTimeMillis()}.mp4"
-                    val uri = com.subtitlecreator.util.FileUtils.saveSrtToDownloads(context, state.subtitles, baseName)
+                    val uri = FileUtils.saveSrtToDownloads(context, state.subtitles, baseName)
                     if (uri != null) {
                         Toast.makeText(context, "File .srt disimpan di folder Downloads!", Toast.LENGTH_LONG).show()
                     } else {
                         Toast.makeText(context, "Gagal menyimpan file .srt", Toast.LENGTH_SHORT).show()
                     }
                 },
-                enabled = state.subtitles.isNotEmpty()
+                enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
+                contentPadding = PaddingValues(horizontal = 10.dp)
             ) {
-                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(".SRT")
+                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(2.dp))
+                Text(".SRT", style = MaterialTheme.typography.labelMedium)
             }
 
             // Tombol Bagikan .SRT
             IconButton(
                 onClick = {
                     val baseName = state.videoFile?.name ?: "subtitle_${System.currentTimeMillis()}.mp4"
-                    com.subtitlecreator.util.FileUtils.shareSrtFile(context, state.subtitles, baseName)
+                    FileUtils.shareSrtFile(context, state.subtitles, baseName)
                 },
-                enabled = state.subtitles.isNotEmpty()
+                enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
+                modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Default.Share, contentDescription = "Bagikan .SRT")
+                Icon(Icons.Default.Share, contentDescription = "Bagikan .SRT", modifier = Modifier.size(18.dp))
             }
 
             // Tombol Burn Video (MP4)
-            Button(onClick = onExport, enabled = state.subtitles.isNotEmpty()) {
-                Text("Burn MP4")
+            Button(
+                onClick = onExport,
+                enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
+                contentPadding = PaddingValues(horizontal = 12.dp)
+            ) {
+                Text("Burn MP4", style = MaterialTheme.typography.labelMedium)
             }
         }
 
-        // Font size slider — updates both the overlay and the burn-in.
+        // Font size slider
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Size", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(48.dp))
+                Text("Size", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(36.dp))
                 Slider(
                     value = state.subtitleFontSize.toFloat(),
                     onValueChange = { vm.setFontSize(it.toInt()) },
                     valueRange = 32f..180f,
                     modifier = Modifier.weight(1f)
                 )
-                Text("${state.subtitleFontSize}", modifier = Modifier.width(48.dp), textAlign = TextAlign.End)
+                Text("${state.subtitleFontSize}", modifier = Modifier.width(36.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.labelMedium)
             }
         }
 
+        // List editor kata per kata
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -247,6 +252,95 @@ fun EditorScreen(
                 )
             }
         }
+    }
+
+    // Modal Pilihan Bahasa Terjemahan
+    if (showTranslateDialog) {
+        AlertDialog(
+            onDismissRequest = { showTranslateDialog = false },
+            title = {
+                Text("Terjemahkan Subtitle", style = MaterialTheme.typography.titleLarge)
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Pilih bahasa tujuan (menggunakan Google Translate Web):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    TranslationService.SUPPORTED_LANGUAGES.forEach { lang ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showTranslateDialog = false
+                                    vm.translateSubtitles(
+                                        targetLang = lang.code,
+                                        onDone = {
+                                            Toast.makeText(context, "Berhasil diterjemahkan ke ${lang.name}!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(lang.flag, fontSize = 20.sp)
+                                Text(lang.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTranslateDialog = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    // Dialog Loading saat Proses Translasi Berjalan
+    if (state.isTranslating) {
+        AlertDialog(
+            onDismissRequest = { /* non-cancelable */ },
+            title = {
+                Text("Menerjemahkan Subtitle...", style = MaterialTheme.typography.titleMedium)
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Menerjemahkan kata ${state.translationProgress} dari ${state.translationTotal}...",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    LinearProgressIndicator(
+                        progress = {
+                            if (state.translationTotal > 0)
+                                (state.translationProgress.toFloat() / state.translationTotal.toFloat()).coerceIn(0f, 1f)
+                            else 0f
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {}
+        )
     }
 }
 

@@ -1,6 +1,7 @@
 package com.subtitlecreator.ui.screens
 
 import android.graphics.Typeface as AndroidTypeface
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
@@ -11,6 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -169,15 +172,49 @@ fun EditorScreen(
 
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                "${state.subtitles.size} words",
+                "${state.subtitles.size} kata",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
-            Button(onClick = onExport, enabled = state.subtitles.isNotEmpty()) { Text("Export") }
+
+            // Tombol Simpan .SRT Langsung
+            OutlinedButton(
+                onClick = {
+                    val baseName = state.videoFile?.name ?: "subtitle_${System.currentTimeMillis()}.mp4"
+                    val uri = com.subtitlecreator.util.FileUtils.saveSrtToDownloads(context, state.subtitles, baseName)
+                    if (uri != null) {
+                        Toast.makeText(context, "File .srt disimpan di folder Downloads!", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Gagal menyimpan file .srt", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                enabled = state.subtitles.isNotEmpty()
+            ) {
+                Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(".SRT")
+            }
+
+            // Tombol Bagikan .SRT
+            IconButton(
+                onClick = {
+                    val baseName = state.videoFile?.name ?: "subtitle_${System.currentTimeMillis()}.mp4"
+                    com.subtitlecreator.util.FileUtils.shareSrtFile(context, state.subtitles, baseName)
+                },
+                enabled = state.subtitles.isNotEmpty()
+            ) {
+                Icon(Icons.Default.Share, contentDescription = "Bagikan .SRT")
+            }
+
+            // Tombol Burn Video (MP4)
+            Button(onClick = onExport, enabled = state.subtitles.isNotEmpty()) {
+                Text("Burn MP4")
+            }
         }
 
         // Font size slider — updates both the overlay and the burn-in.

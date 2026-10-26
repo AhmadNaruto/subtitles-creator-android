@@ -58,11 +58,13 @@ class SubtitleBurner(private val context: Context) {
         videoOut: File,
         fontSize: Int = 72,
         positionFraction: Float = 0.72f,
+        colorHex: String = "#FFD400",
+        isUppercase: Boolean = false,
         onProgress: (Int) -> Unit = {}
     ): File = withContext(Dispatchers.Main) {
         if (videoOut.exists()) videoOut.delete()
 
-        val overlay = SubtitleBitmapOverlay(subtitles, fontSize, montserrat, positionFraction)
+        val overlay = SubtitleBitmapOverlay(subtitles, fontSize, montserrat, positionFraction, colorHex, isUppercase)
         val overlayEffect: Effect = OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(overlay))
 
         val edited = EditedMediaItem.Builder(MediaItem.fromUri(videoIn.toURI().toString()))
@@ -111,7 +113,9 @@ class SubtitleBurner(private val context: Context) {
         private val subs: List<Subtitle>,
         private val fontSizePx: Int,
         private val typeface: Typeface,
-        private val positionFraction: Float
+        private val positionFraction: Float,
+        private val colorHex: String = "#FFD400",
+        private val isUppercase: Boolean = false
     ) : BitmapOverlay() {
 
         // positionFraction = 0 → top of video, 1 → bottom. Media3 anchor Y is NDC (1=top, -1=bottom).
@@ -131,12 +135,13 @@ class SubtitleBurner(private val context: Context) {
         private val cache = LinkedHashMap<String, Bitmap>(16, 0.75f, true)
         private val cacheMax = 64
 
-        // Match the subtitles-creator Python project: yellow Montserrat Bold with a
-        // soft semi-transparent black drop shadow — no outline around letters.
+        // Match the subtitles-creator Python project: Montserrat Bold with a
+        // soft semi-transparent black drop shadow — customizable color.
         private val paint: TextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             this.typeface = this@SubtitleBitmapOverlay.typeface
             textSize = fontSizePx.toFloat()
-            color = Color.rgb(0xFF, 0xD4, 0x00) // yellow
+            val parsed = runCatching { Color.parseColor(colorHex) }.getOrDefault(Color.rgb(0xFF, 0xD4, 0x00))
+            color = parsed
             setShadowLayer(
                 /* radius = */ fontSizePx * 0.10f,
                 /* dx     = */ fontSizePx * 0.035f,
@@ -177,8 +182,11 @@ class SubtitleBurner(private val context: Context) {
                 }
             }
 
-            val text = sub?.text?.trim().orEmpty()
+            var text = sub?.text?.trim().orEmpty()
             if (text.isEmpty()) return emptyBitmap
+            if (isUppercase) {
+                text = text.uppercase()
+            }
 
             cache[text]?.let { return it }
 

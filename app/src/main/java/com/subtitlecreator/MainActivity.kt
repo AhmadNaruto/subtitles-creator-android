@@ -95,9 +95,20 @@ fun AppNav(vm: AppViewModel) {
             })
         }
         composable(Routes.EXPORT) {
-            ExportScreen(state = state, onDone = {
-                nav.navigate(Routes.HOME) { popUpTo(Routes.HOME) { inclusive = true } }
-            })
+            ExportScreen(
+                state = state,
+                onDone = {
+                    nav.navigate(Routes.HOME) { popUpTo(Routes.HOME) { inclusive = true } }
+                },
+                onCancel = {
+                    vm.cancel()
+                    nav.popBackStack()
+                },
+                onBackToEditor = {
+                    vm.clearError()
+                    nav.popBackStack()
+                }
+            )
         }
     }
 }

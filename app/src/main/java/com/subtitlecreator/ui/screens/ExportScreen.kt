@@ -4,14 +4,17 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.subtitlecreator.ui.components.KeepScreenOn
 import com.subtitlecreator.util.FileUtils
@@ -19,7 +22,9 @@ import com.subtitlecreator.util.FileUtils
 @Composable
 fun ExportScreen(
     state: com.subtitlecreator.ui.UiState,
-    onDone: () -> Unit
+    onDone: () -> Unit,
+    onCancel: () -> Unit = {},
+    onBackToEditor: () -> Unit = {}
 ) {
     KeepScreenOn()
     val context = LocalContext.current
@@ -29,7 +34,35 @@ fun ExportScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (state.exporting) {
+        if (state.error != null) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(72.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Export Gagal",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                state.error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(28.dp))
+            Button(
+                onClick = onBackToEditor,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Kembali ke Editor")
+            }
+        } else if (state.exporting) {
             Text(
                 "${state.exportProgress}%",
                 style = MaterialTheme.typography.displayLarge,
@@ -43,6 +76,17 @@ fun ExportScreen(
                 progress = { (state.exportProgress / 100f).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth().height(6.dp)
             )
+            Spacer(Modifier.height(32.dp))
+            OutlinedButton(
+                onClick = onCancel,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Batalkan Export")
+            }
         } else if (state.exportedFile != null) {
             Icon(
                 Icons.Default.CheckCircle,
@@ -103,11 +147,6 @@ fun ExportScreen(
                 onClick = onDone,
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("Proses Video Lain", style = MaterialTheme.typography.titleMedium) }
-        }
-
-        state.error?.let { err ->
-            Spacer(Modifier.height(24.dp))
-            Text(err, color = MaterialTheme.colorScheme.error)
         }
     }
 }

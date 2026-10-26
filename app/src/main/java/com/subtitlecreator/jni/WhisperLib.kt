@@ -39,6 +39,9 @@ object WhisperLib {
 
     data class RawSegment(val text: String, val startMs: Long, val endMs: Long)
 
+    @Volatile
+    private var isCancelled = false
+
     fun transcribe(
         ctxPtr: Long,
         pcm: FloatArray,
@@ -47,6 +50,7 @@ object WhisperLib {
         translate: Boolean = false,
         onProgress: ((Int) -> Unit)? = null
     ): List<RawSegment> {
+        isCancelled = false
         val cb = onProgress?.let { cb ->
             object : ProgressCallback {
                 override fun onProgress(percent: Int) {
@@ -55,7 +59,12 @@ object WhisperLib {
             }
         }
         val flat = nativeTranscribe(ctxPtr, pcm, language, nThreads, translate, cb)
-            ?: error("whisper_full failed")
+        if (flat == null) {
+            if (isCancelled) {
+                throw java.util.concurrent.CancellationException("Whisper transcription was cancelled")
+            }
+            error("whisper_full failed")
+        }
 
         return buildList(flat.size / 3) {
             var i = 0
@@ -66,6 +75,10 @@ object WhisperLib {
         }
     }
 
-    fun cancel() = nativeCancel()
+    fun cancel() {
+        isCancelled = true
+        nativeCancel()
+    }
+
     fun systemInfo(): String = nativeSystemInfo()
 }

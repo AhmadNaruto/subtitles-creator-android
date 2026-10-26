@@ -15,7 +15,25 @@ import java.util.Locale
 
 object FileUtils {
 
+    /** Keep at most [maxKeep] latest temp videos and exports to avoid storage leaks. */
+    fun cleanupTempFiles(context: Context, maxKeep: Int = 2) {
+        runCatching {
+            listOf("videos", "output").forEach { folderName ->
+                val dir = File(context.filesDir, folderName)
+                if (dir.exists() && dir.isDirectory) {
+                    val files = dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
+                    if (files != null && files.size > maxKeep) {
+                        files.drop(maxKeep).forEach { oldFile ->
+                            oldFile.delete()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun copyUriToAppStorage(context: Context, uri: Uri, fileName: String): File {
+        cleanupTempFiles(context, maxKeep = 2)
         val out = File(context.filesDir, "videos").apply { mkdirs() }.resolve(fileName)
         context.contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { input.copyTo(it) }

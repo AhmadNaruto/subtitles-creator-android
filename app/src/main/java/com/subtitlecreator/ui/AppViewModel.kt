@@ -119,11 +119,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteSubtitle(index: Int) {
+    private var lastDeletedSubtitle: Pair<Int, Subtitle>? = null
+
+    fun deleteSubtitle(index: Int): Subtitle? {
+        var removed: Subtitle? = null
         PipelineStore.update { s ->
             val list = s.subtitles.toMutableList()
-            if (index in list.indices) list.removeAt(index)
+            if (index in list.indices) {
+                removed = list.removeAt(index)
+                lastDeletedSubtitle = index to removed!!
+            }
             s.copy(subtitles = list)
+        }
+        return removed
+    }
+
+    fun undoDeleteSubtitle() {
+        val last = lastDeletedSubtitle ?: return
+        PipelineStore.update { s ->
+            val list = s.subtitles.toMutableList()
+            val insertIndex = last.first.coerceIn(0, list.size)
+            list.add(insertIndex, last.second)
+            lastDeletedSubtitle = null
+            s.copy(subtitles = list)
+        }
+    }
+
+    fun mergeWithNextSubtitle(index: Int) {
+        PipelineStore.update { s ->
+            val list = s.subtitles.toMutableList()
+            if (index in 0 until list.lastIndex) {
+                val cur = list[index]
+                val next = list[index + 1]
+                val mergedText = "${cur.text} ${next.text}".trim()
+                val mergedSub = cur.copy(text = mergedText, endMs = next.endMs)
+                list[index] = mergedSub
+                list.removeAt(index + 1)
+                s.copy(subtitles = list)
+            } else s
         }
     }
 
@@ -179,12 +212,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         startService(PipelineService.ACTION_CANCEL)
     }
 
+    fun shiftSubtitleTime(index: Int, deltaMs: Long) {
+        PipelineStore.update { s ->
+            val list = s.subtitles.toMutableList()
+            val cur = list.getOrNull(index) ?: return@update s
+            val dur = cur.durationMs.coerceAtLeast(150L)
+            val newStart = maxOf(0L, cur.startMs + deltaMs)
+            val newEnd = newStart + dur
+            list[index] = cur.copy(startMs = newStart, endMs = newEnd)
+            s.copy(subtitles = list)
+        }
+    }
+
+    fun snapSubtitleToTime(index: Int, playbackMs: Long) {
+        PipelineStore.update { s ->
+            val list = s.subtitles.toMutableList()
+            val cur = list.getOrNull(index) ?: return@update s
+            val dur = cur.durationMs.coerceAtLeast(150L)
+            val newStart = maxOf(0L, playbackMs)
+            list[index] = cur.copy(startMs = newStart, endMs = newStart + dur)
+            s.copy(subtitles = list)
+        }
+    }
+
     fun setFontSize(size: Int) {
         PipelineStore.update { it.copy(subtitleFontSize = size.coerceIn(24, 200)) }
     }
 
     fun setSubtitlePosition(fraction: Float) {
         PipelineStore.update { it.copy(subtitlePositionFraction = fraction.coerceIn(0f, 0.95f)) }
+    }
+
+    fun setSubtitleColor(hex: String) {
+        PipelineStore.update { it.copy(subtitleColorHex = hex) }
+    }
+
+    fun setUppercase(enabled: Boolean) {
+        PipelineStore.update { it.copy(isUppercase = enabled) }
     }
 
     fun clearError() = PipelineStore.update { it.copy(error = null) }

@@ -41,6 +41,8 @@ object PipelineStore {
         val subtitleFontSize: Int = 50,
         // Fraction-from-top for the TOP of the subtitle text (0 = very top, 1 = very bottom).
         val subtitlePositionFraction: Float = 0.72f,
+        val subtitleColorHex: String = "#FFD400",
+        val isUppercase: Boolean = false,
         val error: String? = null
     )
 

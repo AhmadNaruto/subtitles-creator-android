@@ -3,6 +3,7 @@ package com.subtitlecreator.ui.screens
 import android.graphics.Typeface as AndroidTypeface
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
@@ -10,10 +11,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Share
@@ -46,6 +49,7 @@ import com.subtitlecreator.service.TranslationService
 import com.subtitlecreator.ui.AppViewModel
 import com.subtitlecreator.util.FileUtils
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -55,6 +59,8 @@ fun EditorScreen(
     onExport: () -> Unit
 ) {
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var showTranslateDialog by remember { mutableStateOf(false) }
 
     val player = remember(state.videoFile) {
@@ -90,7 +96,14 @@ fun EditorScreen(
         FontFamily(androidx.compose.ui.text.font.Typeface(tf))
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
         // Video Preview Player Box
         Box(
             modifier = Modifier
@@ -123,9 +136,15 @@ fun EditorScreen(
                         (boxHeightPx * state.subtitlePositionFraction).toDp()
                     }
 
+                    val displayText = if (state.isUppercase) activeText.uppercase() else activeText
+                    val subtitleColor = remember(state.subtitleColorHex) {
+                        runCatching { Color(android.graphics.Color.parseColor(state.subtitleColorHex)) }
+                            .getOrDefault(Color(0xFF, 0xD4, 0x00))
+                    }
+
                     Text(
-                        text = activeText,
-                        color = Color(0xFF, 0xD4, 0x00), // yellow
+                        text = displayText,
+                        color = subtitleColor,
                         fontFamily = montserratFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = fontSizeSp,
@@ -221,17 +240,68 @@ fun EditorScreen(
             }
         }
 
-        // Font size slider
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Size", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(36.dp))
-                Slider(
-                    value = state.subtitleFontSize.toFloat(),
-                    onValueChange = { vm.setFontSize(it.toInt()) },
-                    valueRange = 32f..180f,
-                    modifier = Modifier.weight(1f)
+        // Styling controls: Colors, CAPS toggle, and Font Size
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Color choices
+                val colorOptions = listOf(
+                    "#FFD400" to Color(0xFF, 0xD4, 0x00),
+                    "#FFFFFF" to Color.White,
+                    "#00FF66" to Color(0x00, 0xFF, 0x66),
+                    "#00E5FF" to Color(0x00, 0xE5, 0xFF)
                 )
-                Text("${state.subtitleFontSize}", modifier = Modifier.width(36.dp), textAlign = TextAlign.End, style = MaterialTheme.typography.labelMedium)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    colorOptions.forEach { (hex, c) ->
+                        val isSelected = state.subtitleColorHex.equals(hex, ignoreCase = true)
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(c, CircleShape)
+                                .clickable { vm.setSubtitleColor(hex) }
+                                .then(
+                                    if (isSelected) {
+                                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                    } else Modifier
+                                )
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(4.dp))
+
+                // Uppercase Toggle Chip
+                FilterChip(
+                    selected = state.isUppercase,
+                    onClick = { vm.setUppercase(!state.isUppercase) },
+                    label = { Text("CAPS", style = MaterialTheme.typography.labelSmall) }
+                )
+
+                // Font Size Slider
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(start = 4.dp)
+                ) {
+                    Text("Size", style = MaterialTheme.typography.labelSmall)
+                    Slider(
+                        value = state.subtitleFontSize.toFloat(),
+                        onValueChange = { vm.setFontSize(it.toInt()) },
+                        valueRange = 32f..180f,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${state.subtitleFontSize}", style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
 
@@ -245,14 +315,32 @@ fun EditorScreen(
                 SubtitleRow(
                     sub = sub,
                     isActive = idx == activeIndex,
+                    canMerge = idx < state.subtitles.lastIndex,
                     onClick = { player.seekTo(sub.startMs) },
                     onTextChange = { vm.updateSubtitle(idx, text = it) },
-                    onDelete = { vm.deleteSubtitle(idx) },
-                    onAdd = { vm.addSubtitle(idx) }
+                    onDelete = {
+                        val deleted = vm.deleteSubtitle(idx)
+                        if (deleted != null) {
+                            scope.launch {
+                                val res = snackbarHostState.showSnackbar(
+                                    message = "\"${deleted.text}\" dihapus",
+                                    actionLabel = "BATAL",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (res == SnackbarResult.ActionPerformed) {
+                                    vm.undoDeleteSubtitle()
+                                }
+                            }
+                        }
+                    },
+                    onAdd = { vm.addSubtitle(idx) },
+                    onMerge = { vm.mergeWithNextSubtitle(idx) },
+                    onShiftTime = { delta -> vm.shiftSubtitleTime(idx, delta) }
                 )
             }
         }
     }
+}
 
     // Modal Pilihan Bahasa Terjemahan
     if (showTranslateDialog) {
@@ -348,10 +436,13 @@ fun EditorScreen(
 private fun SubtitleRow(
     sub: Subtitle,
     isActive: Boolean,
+    canMerge: Boolean,
     onClick: () -> Unit,
     onTextChange: (String) -> Unit,
     onDelete: () -> Unit,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    onMerge: () -> Unit,
+    onShiftTime: (Long) -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -360,29 +451,70 @@ private fun SubtitleRow(
             else MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(0.18f).padding(end = 8.dp)) {
-                TextButton(onClick = onClick, contentPadding = PaddingValues(0.dp)) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.width(76.dp).padding(end = 6.dp)) {
+                    TextButton(onClick = onClick, contentPadding = PaddingValues(0.dp)) {
+                        Text(
+                            formatMs(sub.startMs),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                     Text(
-                        formatMs(sub.startMs),
+                        formatMs(sub.endMs),
                         style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    formatMs(sub.endMs),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                OutlinedTextField(
+                    value = sub.text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
                 )
+                IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = "Add after", modifier = Modifier.size(18.dp))
+                }
+                if (canMerge) {
+                    IconButton(onClick = onMerge, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.CallMerge, contentDescription = "Gabung kata berikutnya", modifier = Modifier.size(18.dp))
+                    }
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                }
             }
-            OutlinedTextField(
-                value = sub.text,
-                onValueChange = onTextChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add after") }
-            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+
+            if (isActive) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Geser waktu:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FilledTonalButton(
+                        onClick = { onShiftTime(-100L) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("-0.1s", style = MaterialTheme.typography.labelSmall)
+                    }
+                    FilledTonalButton(
+                        onClick = { onShiftTime(100L) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("+0.1s", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
     }
 }

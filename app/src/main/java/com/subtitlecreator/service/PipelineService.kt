@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.subtitlecreator.jni.WhisperLib
 import com.subtitlecreator.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -187,14 +188,31 @@ class PipelineService : Service() {
                 }
                 updateNotification("Transkripsi selesai!", 100)
             } catch (t: Throwable) {
-                Log.e(TAG, "transcribe failed", t)
-                PipelineStore.update {
-                    it.copy(
-                        transcribing = false,
-                        error = "Gagal transkripsi: ${t.message}"
-                    )
+                if (t is java.util.concurrent.CancellationException || t is kotlinx.coroutines.CancellationException || t.message?.contains("cancel", ignoreCase = true) == true) {
+                    Log.i(TAG, "Transkripsi dibatalkan oleh pengguna")
+                    PipelineStore.update {
+                        it.copy(
+                            transcribing = false,
+                            transcribeProgress = 0,
+                            transcribeStage = "",
+                            transcribeDetail = ""
+                        )
+                    }
+                } else {
+                    Log.e(TAG, "transcribe failed", t)
+                    PipelineStore.update {
+                        it.copy(
+                            transcribing = false,
+                            error = "Gagal transkripsi: ${t.message}"
+                        )
+                    }
                 }
             } finally {
+                runCatching {
+                    val video = File(videoPath)
+                    val wav = File(video.parentFile, video.nameWithoutExtension + ".wav")
+                    if (wav.exists()) wav.delete()
+                }
                 releaseWakeLock()
                 stopSelf()
             }
@@ -217,19 +235,26 @@ class PipelineService : Service() {
                 val cur = PipelineStore.current()
                 val fontSize = cur.subtitleFontSize
                 // Media3 TextOverlay uses pixel size scaled to the video frame's bitmap;
-                // ~2x the ASS fontsize looks right on 1080p.
-                val pxSize = (fontSize * 2).coerceIn(48, 400)
+                // Proportional to the real video frame height (standardized to 1080p).
+                val baseHeight = cur.videoHeightPx.takeIf { it > 0 } ?: 1080
+                val pxSize = ((fontSize * 2f) * (baseHeight / 1080f)).toInt().coerceIn(36, 600)
                 burner.burn(
                     videoIn = video,
                     subtitles = subs,
                     videoOut = out,
                     fontSize = pxSize,
-                    positionFraction = cur.subtitlePositionFraction
+                    positionFraction = cur.subtitlePositionFraction,
+                    colorHex = cur.subtitleColorHex,
+                    isUppercase = cur.isUppercase
                 ) { p ->
                     PipelineStore.update { it.copy(exportProgress = p) }
                     updateNotification("Exporting $p%", p)
                 }
                 val uri = FileUtils.saveToGallery(applicationContext, out, out.name)
+                // Delete internal temporary file now that it is safely copied to public Movies gallery
+                runCatching { out.delete() }
+                FileUtils.cleanupTempFiles(applicationContext, maxKeep = 2)
+
                 PipelineStore.update {
                     it.copy(exporting = false, exportedFile = out, savedUri = uri, exportProgress = 100)
                 }
@@ -245,7 +270,16 @@ class PipelineService : Service() {
     }
 
     private fun cancelActive() {
+        WhisperLib.cancel()
         activeJob?.cancel()
+        PipelineStore.update {
+            it.copy(
+                transcribing = false,
+                exporting = false,
+                transcribeProgress = 0,
+                exportProgress = 0
+            )
+        }
         stopSelf()
     }
 

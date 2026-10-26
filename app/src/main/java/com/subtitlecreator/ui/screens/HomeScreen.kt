@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
@@ -37,6 +38,24 @@ fun HomeScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let(vm::onVideoPicked)
+    }
+
+    val modelFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            Toast.makeText(context, "Sedang mengimpor model...", Toast.LENGTH_SHORT).show()
+            vm.importModelFromStorage(
+                uri = it,
+                onDone = { spec ->
+                    Toast.makeText(context, "Model '${spec.displayName}' siap digunakan!", Toast.LENGTH_LONG).show()
+                    showModelDialog = false
+                },
+                onError = { err ->
+                    Toast.makeText(context, "Gagal impor: $err", Toast.LENGTH_LONG).show()
+                }
+            )
+        }
     }
 
     var showModelDialog by remember { mutableStateOf(false) }
@@ -251,6 +270,18 @@ fun HomeScreen(
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // Tombol Impor File Model dari File HP (.bin)
+                    OutlinedButton(
+                        onClick = {
+                            modelFilePicker.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("📁 Impor Model dari File HP (.bin)")
+                    }
+
                     // Tombol Tambah Model Manual dari URL / Hugging Face
                     OutlinedButton(
                         onClick = {
@@ -310,15 +341,28 @@ fun HomeScreen(
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.padding(horizontal = 4.dp)
                                         )
-                                    }
 
-                                    if (spec.isCustom) {
+                                        IconButton(
+                                            onClick = {
+                                                vm.deleteDownloadedModel(spec.id)
+                                                Toast.makeText(context, "File model '${spec.displayName}' telah dihapus dari HP", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.DeleteOutline,
+                                                contentDescription = "Hapus file model",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    } else if (spec.isCustom) {
                                         IconButton(
                                             onClick = {
                                                 vm.removeCustomModel(spec.id)
                                                 Toast.makeText(context, "Model custom dihapus", Toast.LENGTH_SHORT).show()
                                             },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.DeleteOutline,

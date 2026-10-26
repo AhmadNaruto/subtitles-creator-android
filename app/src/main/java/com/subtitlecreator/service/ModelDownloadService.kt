@@ -1,6 +1,8 @@
 package com.subtitlecreator.service
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -120,6 +122,86 @@ class ModelDownloadService(private val context: Context) {
             saveCustomModels(list)
             runCatching { modelFile(spec).delete() }
         }
+    }
+
+    /**
+     * Deletes the local binary file of any downloaded model (pre-defined or custom).
+     */
+    fun deleteModelFile(spec: ModelSpec): Boolean {
+        val file = modelFile(spec)
+        val deleted = runCatching { if (file.exists()) file.delete() else false }.getOrDefault(false)
+        if (spec.isCustom) {
+            removeCustomModel(spec.id)
+        }
+        return deleted
+    }
+
+    /**
+     * Imports an existing .bin model from external/device storage.
+     */
+    suspend fun importModelFromUri(uri: Uri): ModelSpec = withContext(Dispatchers.IO) {
+        val rawName = queryFileName(uri) ?: "imported_model_${System.currentTimeMillis()}.bin"
+        val fileName = if (rawName.endsWith(".bin")) rawName else "$rawName.bin"
+
+        // Check if this fileName matches one of the standard pre-configured models
+        val existingPredefined = ALL_MODELS.firstOrNull { it.fileName.equals(fileName, ignoreCase = true) }
+        val targetFile = if (existingPredefined != null) {
+            modelFile(existingPredefined)
+        } else {
+            File(modelsDir(), fileName)
+        }
+
+        val tmp = File(targetFile.parentFile, targetFile.name + ".tmp")
+        tmp.delete()
+
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            tmp.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: error("Tidak dapat membuka file model dari URI")
+
+        check(tmp.length() > 5_000_000L) {
+            tmp.delete()
+            "Ukuran file terlalu kecil (< 5MB), pastikan file yang dipilih adalah model GGML Whisper (.bin) yang valid."
+        }
+
+        if (targetFile.exists()) targetFile.delete()
+        check(tmp.renameTo(targetFile)) { "Gagal menyimpan file model ke direktori aplikasi" }
+
+        val fileSizeMb = (targetFile.length() / 1_000_000L).toInt()
+        Log.i(TAG, "Imported model: ${targetFile.name} ($fileSizeMb MB)")
+
+        if (existingPredefined != null) {
+            existingPredefined
+        } else {
+            // Register as custom model
+            val id = "imported_" + fileName.substringBeforeLast(".")
+            val spec = ModelSpec(
+                id = id,
+                displayName = "Lokal ($fileName, ~$fileSizeMb MB)",
+                url = "file://${targetFile.absolutePath}",
+                sizeMb = fileSizeMb,
+                fileName = fileName,
+                isCustom = true
+            )
+            val list = getCustomModels().toMutableList()
+            list.removeAll { it.id == id || it.fileName == fileName }
+            list.add(0, spec)
+            saveCustomModels(list)
+            spec
+        }
+    }
+
+    private fun queryFileName(uri: Uri): String? {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    return cursor.getString(nameIndex)
+                }
+            }
+        }
+        return uri.path?.substringAfterLast('/')
     }
 
     suspend fun download(

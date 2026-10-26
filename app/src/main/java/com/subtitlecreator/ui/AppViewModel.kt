@@ -70,6 +70,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun deleteDownloadedModel(modelId: String) {
+        val spec = modelDl.getModelById(modelId)
+        modelDl.deleteModelFile(spec)
+        if (spec.isCustom && state.value.selectedModelId == modelId) {
+            selectModel(ModelDownloadService.BASE_Q5.id)
+        } else {
+            refreshModelStatus()
+        }
+    }
+
+    fun importModelFromStorage(
+        uri: Uri,
+        onDone: (ModelDownloadService.ModelSpec) -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val spec = modelDl.importModelFromUri(uri)
+                selectModel(spec.id)
+                refreshModelStatus()
+                onDone(spec)
+            } catch (t: Throwable) {
+                onError(t.message ?: "Gagal mengimpor file model")
+            }
+        }
+    }
+
     fun downloadModel(modelId: String? = null) {
         val target = modelId ?: state.value.selectedModelId
         startService(action = PipelineService.ACTION_DOWNLOAD, modelId = target)

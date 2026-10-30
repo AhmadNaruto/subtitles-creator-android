@@ -41,6 +41,7 @@ class PipelineService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        whisper.setContext(applicationContext)
         ffmpeg = FFmpegService(applicationContext)
         burner = SubtitleBurner(applicationContext)
         modelDl = ModelDownloadService(applicationContext)
@@ -160,16 +161,12 @@ class PipelineService : Service() {
                     wav16kMono = wav,
                     language = chosenLang,
                     nThreads = optimalThreads,
+                    useVad = true,
                     onStatusUpdate = { status ->
                         PipelineStore.update { it.copy(transcribeDetail = status) }
                     },
                     onProgress = { p ->
-                        PipelineStore.update {
-                            it.copy(
-                                transcribeProgress = p,
-                                transcribeDetail = "Memproses transkripsi: $p% selesai"
-                            )
-                        }
+                        PipelineStore.update { it.copy(transcribeProgress = p) }
                         updateNotification("Mentranskripsi: $p%", p)
                     }
                 )

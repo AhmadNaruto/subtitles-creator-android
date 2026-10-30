@@ -12,3 +12,5 @@
 app/.cxx/
 app/src/main/cpp/whisper.cpp/
 app/src/main/assets/fonts/
+app/src/main/assets/models/
+

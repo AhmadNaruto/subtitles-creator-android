@@ -24,6 +24,17 @@ else
     echo "    (already present — skipping)"
 fi
 
+VAD_DIR="$SCRIPT_DIR/app/src/main/assets/models"
+echo "==> Downloading silero_vad.onnx"
+mkdir -p "$VAD_DIR"
+if [ ! -f "$VAD_DIR/silero_vad.onnx" ]; then
+    curl -fSL -o "$VAD_DIR/silero_vad.onnx" \
+        "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+else
+    echo "    (already present — skipping)"
+fi
+
+
 echo ""
 echo "Done. Next steps:"
 echo "  ./gradlew assembleDebug"

@@ -1,5 +1,6 @@
 package com.subtitlecreator.service
 
+import android.content.Context
 import android.util.Log
 import com.subtitlecreator.jni.WhisperLib
 import com.subtitlecreator.model.Subtitle
@@ -12,17 +13,25 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Orchestrates model load → PCM decode → whisper.cpp call → post-processing.
+ * Orchestrates model load → PCM decode → voice activity detection (Silero VAD)
+ * → whisper.cpp call → post-processing.
  *
  * Word-timing strategy: whisper.cpp is invoked with split_on_word=true + max_len=1 so
  * each returned segment is one word with native timestamps. We then:
  *   1) merge compound fragments (punctuation, leading/trailing quotes) back into their neighbour
  *   2) enforce a minimum visible duration so subtitles don't flash
  */
-class WhisperService {
+class WhisperService(context: Context? = null) {
 
     private var ctxPtr: Long = 0L
     private var loadedModelPath: String? = null
+    private var vadDetector: SileroVadDetector? = context?.let { SileroVadDetector(it.applicationContext) }
+
+    fun setContext(context: Context) {
+        if (vadDetector == null) {
+            vadDetector = SileroVadDetector(context.applicationContext)
+        }
+    }
 
     fun ensureLoaded(modelFile: File) {
         if (ctxPtr != 0L && loadedModelPath == modelFile.absolutePath) return
@@ -41,12 +50,15 @@ class WhisperService {
             ctxPtr = 0L
             loadedModelPath = null
         }
+        vadDetector?.close()
+        vadDetector = null
     }
 
     suspend fun transcribe(
         wav16kMono: File,
         language: String = "auto",
         nThreads: Int = 6,
+        useVad: Boolean = true,
         onStatusUpdate: (String) -> Unit = {},
         onProgress: (Int) -> Unit = {}
     ): TranscriptionResult = withContext(Dispatchers.Default) {
@@ -59,16 +71,81 @@ class WhisperService {
         val sec = totalSec % 60
         val durStr = if (min > 0) "${min}m ${sec}s" else "${sec}s"
         Log.i(TAG, "Decoded ${pcm.size} samples ($durStr)")
-        onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
 
-        val raw = WhisperLib.transcribe(
-            ctxPtr = ctxPtr,
-            pcm = pcm,
-            language = language,
-            nThreads = nThreads,
-            translate = false,
-            onProgress = onProgress
-        )
+        val raw: List<WhisperLib.RawSegment> = if (useVad && vadDetector != null) {
+            onStatusUpdate("Mendeteksi vokal dengan Silero VAD...")
+            val speechSegments = vadDetector?.detectSpeechSegments(pcm) ?: emptyList()
+            if (speechSegments.isNotEmpty()) {
+                val totalSpeechSamples = speechSegments.sumOf { (it.endSample - it.startSample).toLong() }
+                val totalSpeechSec = (totalSpeechSamples / 16000.0).toInt()
+                val savedPct = if (totalSec > 0) (((totalSec - totalSpeechSec) * 100) / totalSec).coerceAtLeast(0) else 0
+                val speechDurStr = if (totalSpeechSec >= 60) "${totalSpeechSec / 60}m ${totalSpeechSec % 60}s" else "${totalSpeechSec}s"
+                Log.i(TAG, "Silero VAD: speech duration $speechDurStr vs total $durStr (menghemat $savedPct% durasi hening)")
+                onStatusUpdate("Silero VAD: ${speechSegments.size} segmen bicara ditemukan (hemat $savedPct% hening)")
+
+                val collectedRaw = ArrayList<WhisperLib.RawSegment>()
+                var completedSamples = 0L
+
+                for ((idx, seg) in speechSegments.withIndex()) {
+                    val segSamples = seg.endSample - seg.startSample
+                    if (segSamples <= 0) continue
+
+                    val segPcm = pcm.copyOfRange(seg.startSample, seg.endSample)
+                    val segRaw = WhisperLib.transcribe(
+                        ctxPtr = ctxPtr,
+                        pcm = segPcm,
+                        language = language,
+                        nThreads = nThreads,
+                        translate = false,
+                        onProgress = { segProgress ->
+                            val currentSamples = (segProgress.toLong() * segSamples) / 100L
+                            val overallPct = if (totalSpeechSamples > 0) {
+                                (((completedSamples + currentSamples) * 100L) / totalSpeechSamples).toInt()
+                            } else {
+                                segProgress
+                            }
+                            onProgress(overallPct.coerceIn(0, 100))
+                            onStatusUpdate("Transkripsi segmen [${idx + 1}/${speechSegments.size}] ($speechDurStr vokal): $segProgress%")
+                        }
+                    )
+
+                    // Shift segment timestamps to video absolute time
+                    val offsetMs = seg.startMs
+                    for (r in segRaw) {
+                        collectedRaw.add(
+                            WhisperLib.RawSegment(
+                                text = r.text,
+                                startMs = r.startMs + offsetMs,
+                                endMs = r.endMs + offsetMs
+                            )
+                        )
+                    }
+                    completedSamples += segSamples
+                }
+                collectedRaw
+            } else {
+                Log.i(TAG, "Silero VAD tidak menemukan segmen vokal, fallback ke seluruh audio")
+                onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
+                WhisperLib.transcribe(
+                    ctxPtr = ctxPtr,
+                    pcm = pcm,
+                    language = language,
+                    nThreads = nThreads,
+                    translate = false,
+                    onProgress = onProgress
+                )
+            }
+        } else {
+            onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
+            WhisperLib.transcribe(
+                ctxPtr = ctxPtr,
+                pcm = pcm,
+                language = language,
+                nThreads = nThreads,
+                translate = false,
+                onProgress = onProgress
+            )
+        }
 
         // whisper's t0 marks where the word starts — trust it.
         // whisper's t1 often gets stretched to the next event (next word / end of
@@ -82,6 +159,7 @@ class WhisperService {
             subtitles = sanitized
         )
     }
+
 
     /** Decode a 16kHz mono PCM16 WAV file into a float32 array normalized to [-1, 1]. */
     private fun readWavPcmFloat(wav: File): FloatArray {

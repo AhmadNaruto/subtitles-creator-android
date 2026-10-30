@@ -34,6 +34,11 @@ fun HomeScreen(
     onStartTranscribe: () -> Unit
 ) {
     val context = LocalContext.current
+    var showModelDialog by remember { mutableStateOf(false) }
+    var showAddCustomDialog by remember { mutableStateOf(false) }
+    var customUrlInput by remember { mutableStateOf("") }
+    var customNameInput by remember { mutableStateOf("") }
+
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -58,10 +63,6 @@ fun HomeScreen(
         }
     }
 
-    var showModelDialog by remember { mutableStateOf(false) }
-    var showAddCustomDialog by remember { mutableStateOf(false) }
-    var customUrlInput by remember { mutableStateOf("") }
-    var customNameInput by remember { mutableStateOf("") }
 
     val currentSpec = remember(state.selectedModelId) {
         vm.modelDl.getModelById(state.selectedModelId)

@@ -147,9 +147,11 @@ class PipelineService : Service() {
                 updateNotification("Mentranskripsi dengan Whisper AI…", 0)
 
                 // Adaptive CPU threading based on device cores
+                // On ARM big.LITTLE mobile architectures, sticking strictly to the 4 Performance
+                // cores prevents thermal throttling and thread barrier waits on slow efficiency cores.
                 val cpuCores = Runtime.getRuntime().availableProcessors()
                 val optimalThreads = when {
-                    cpuCores >= 8 -> 6 // 4-6 Performance cores on flagship SoCs
+                    cpuCores >= 8 -> 4 // Target the 4 Big/Prime performance cores
                     cpuCores in 6..7 -> 4
                     cpuCores in 4..5 -> (cpuCores - 1).coerceAtLeast(2)
                     else -> 2

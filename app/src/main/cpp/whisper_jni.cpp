@@ -49,6 +49,7 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeInitContext(
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false;
+    cparams.flash_attn = true;
     // DTW disabled by default — split_on_word + max_len=1 gives native word segments
     // which are already accurate. Enable DTW here if you want sub-token precision.
     cparams.dtw_token_timestamps = false;
@@ -111,6 +112,13 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
     p.no_context        = true;
     p.single_segment    = false;
     p.suppress_blank    = true;
+
+    // === Speed optimizations for mobile inference ===
+    // Silero VAD already removes silence/noise chunks, so disabling temperature
+    // fallbacks prevents expensive multi-pass retries on degraded audio.
+    p.no_fallback       = true;
+    p.temperature_inc   = 0.0f;
+    p.beam_search.beam_size = 1;
 
     // === word-level timestamps: 1 segment per word with native start/end ===
     p.token_timestamps  = true;

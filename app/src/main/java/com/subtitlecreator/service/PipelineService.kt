@@ -56,7 +56,10 @@ class PipelineService : Service() {
                 videoPath = intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn(),
                 language = intent.getStringExtra(EXTRA_LANGUAGE)
             )
-            ACTION_EXPORT     -> startExport(intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn())
+            ACTION_EXPORT     -> startExport(
+                videoPath = intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn(),
+                exportType = intent.getStringExtra(EXTRA_EXPORT_TYPE) ?: EXPORT_TYPE_MP4
+            )
             ACTION_CANCEL     -> cancelActive()
         }
         return START_NOT_STICKY
@@ -218,7 +221,7 @@ class PipelineService : Service() {
         }
     }
 
-    private fun startExport(videoPath: String) {
+    private fun startExport(videoPath: String, exportType: String = EXPORT_TYPE_MP4) {
         if (activeJob?.isActive == true) return
         activeJob = scope.launch {
             acquireWakeLock()
@@ -226,36 +229,68 @@ class PipelineService : Service() {
                 val subs = PipelineStore.current().subtitles
                 if (subs.isEmpty()) { stopSelf(); return@launch }
 
-                PipelineStore.update { it.copy(exporting = true, exportProgress = 0, error = null) }
-                updateNotification("Burning subtitles…", 0)
+                val isMkv = exportType.equals(EXPORT_TYPE_MKV, ignoreCase = true)
+                val typeTag = if (isMkv) EXPORT_TYPE_MKV else EXPORT_TYPE_MP4
+                val detailMsg = if (isMkv) {
+                    "Menggabungkan soft subtitle ke kontainer MKV (FFmpeg stream copy)..."
+                } else {
+                    "Membakar subtitle ke dalam frame video MP4 (Media3)..."
+                }
+
+                PipelineStore.update {
+                    it.copy(
+                        exporting = true,
+                        exportProgress = 0,
+                        exportType = typeTag,
+                        exportDetail = detailMsg,
+                        error = null
+                    )
+                }
+                updateNotification(if (isMkv) "Embedding MKV subtitles…" else "Burning subtitles…", 0)
 
                 val video = File(videoPath)
-                val out = FileUtils.outputVideoFile(applicationContext)
-                val cur = PipelineStore.current()
-                val fontSize = cur.subtitleFontSize
-                // Media3 TextOverlay uses pixel size scaled to the video frame's bitmap;
-                // Proportional to the real video frame height (standardized to 1080p).
-                val baseHeight = cur.videoHeightPx.takeIf { it > 0 } ?: 1080
-                val pxSize = ((fontSize * 2f) * (baseHeight / 1080f)).toInt().coerceIn(36, 600)
-                burner.burn(
-                    videoIn = video,
-                    subtitles = subs,
-                    videoOut = out,
-                    fontSize = pxSize,
-                    positionFraction = cur.subtitlePositionFraction,
-                    colorHex = cur.subtitleColorHex,
-                    isUppercase = cur.isUppercase
-                ) { p ->
-                    PipelineStore.update { it.copy(exportProgress = p) }
-                    updateNotification("Exporting $p%", p)
+                val out = if (isMkv) {
+                    FileUtils.outputMkvFile(applicationContext)
+                } else {
+                    FileUtils.outputVideoFile(applicationContext)
                 }
+
+                if (isMkv) {
+                    PipelineStore.update { it.copy(exportProgress = 25, exportDetail = "Membuat stream softsub SRT & multiplexing MKV...") }
+                    ffmpeg.embedSrtToMkv(videoIn = video, subtitles = subs, mkvOut = out)
+                    PipelineStore.update { it.copy(exportProgress = 90, exportDetail = "Menyimpan file MKV ke galeri...") }
+                } else {
+                    val cur = PipelineStore.current()
+                    val fontSize = cur.subtitleFontSize
+                    val baseHeight = cur.videoHeightPx.takeIf { it > 0 } ?: 1080
+                    val pxSize = ((fontSize * 2f) * (baseHeight / 1080f)).toInt().coerceIn(36, 600)
+                    burner.burn(
+                        videoIn = video,
+                        subtitles = subs,
+                        videoOut = out,
+                        fontSize = pxSize,
+                        positionFraction = cur.subtitlePositionFraction,
+                        colorHex = cur.subtitleColorHex,
+                        isUppercase = cur.isUppercase
+                    ) { p ->
+                        PipelineStore.update { it.copy(exportProgress = p, exportDetail = "Merender video dengan subtitle: $p%") }
+                        updateNotification("Exporting MP4 $p%", p)
+                    }
+                }
+
                 val uri = FileUtils.saveToGallery(applicationContext, out, out.name)
                 // Delete internal temporary file now that it is safely copied to public Movies gallery
                 runCatching { out.delete() }
                 FileUtils.cleanupTempFiles(applicationContext, maxKeep = 2)
 
                 PipelineStore.update {
-                    it.copy(exporting = false, exportedFile = out, savedUri = uri, exportProgress = 100)
+                    it.copy(
+                        exporting = false,
+                        exportedFile = out,
+                        savedUri = uri,
+                        exportProgress = 100,
+                        exportDetail = if (isMkv) "File MKV dengan soft subtitle berhasil disimpan!" else "Video MP4 dengan subtitle berhasil disimpan!"
+                    )
                 }
                 updateNotification("Export done — saved to gallery", 100)
             } catch (t: Throwable) {
@@ -354,5 +389,8 @@ class PipelineService : Service() {
         const val EXTRA_VIDEO_PATH = "videoPath"
         const val EXTRA_MODEL_ID = "modelId"
         const val EXTRA_LANGUAGE = "language"
+        const val EXTRA_EXPORT_TYPE = "exportType"
+        const val EXPORT_TYPE_MP4 = "mp4"
+        const val EXPORT_TYPE_MKV = "mkv"
     }
 }

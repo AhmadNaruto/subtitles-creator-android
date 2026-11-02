@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CPP_DIR="$SCRIPT_DIR/app/src/main/cpp"
 FONT_DIR="$SCRIPT_DIR/app/src/main/assets/fonts"
-WHISPER_VERSION="v1.7.4"
+WHISPER_VERSION="v1.9.5"
 
 echo "==> Cloning whisper.cpp ($WHISPER_VERSION) into $CPP_DIR/whisper.cpp"
 if [ ! -d "$CPP_DIR/whisper.cpp" ]; then
@@ -25,11 +25,11 @@ else
 fi
 
 VAD_DIR="$SCRIPT_DIR/app/src/main/assets/models"
-echo "==> Downloading silero_vad.onnx"
+echo "==> Downloading ggml-silero-v6.2.0.bin"
 mkdir -p "$VAD_DIR"
-if [ ! -f "$VAD_DIR/silero_vad.onnx" ]; then
-    curl -fSL -o "$VAD_DIR/silero_vad.onnx" \
-        "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+if [ ! -f "$VAD_DIR/ggml-silero-v6.2.0.bin" ]; then
+    curl -fSL -o "$VAD_DIR/ggml-silero-v6.2.0.bin" \
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
 else
     echo "    (already present — skipping)"
 fi

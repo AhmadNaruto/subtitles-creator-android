@@ -56,7 +56,8 @@ import kotlinx.coroutines.launch
 fun EditorScreen(
     state: com.subtitlecreator.ui.UiState,
     vm: AppViewModel,
-    onExport: () -> Unit
+    onExportMp4: () -> Unit,
+    onExportMkv: () -> Unit
 ) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -230,11 +231,20 @@ fun EditorScreen(
                 Icon(Icons.Default.Share, contentDescription = "Bagikan .SRT", modifier = Modifier.size(18.dp))
             }
 
-            // Tombol Burn Video (MP4)
-            Button(
-                onClick = onExport,
+            // Tombol Embed MKV (Softsub Cepat)
+            OutlinedButton(
+                onClick = onExportMkv,
                 enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
-                contentPadding = PaddingValues(horizontal = 12.dp)
+                contentPadding = PaddingValues(horizontal = 8.dp)
+            ) {
+                Text("MKV Softsub", style = MaterialTheme.typography.labelMedium)
+            }
+
+            // Tombol Burn Video (MP4 Hardsub)
+            Button(
+                onClick = onExportMp4,
+                enabled = state.subtitles.isNotEmpty() && !state.isTranslating,
+                contentPadding = PaddingValues(horizontal = 10.dp)
             ) {
                 Text("Burn MP4", style = MaterialTheme.typography.labelMedium)
             }

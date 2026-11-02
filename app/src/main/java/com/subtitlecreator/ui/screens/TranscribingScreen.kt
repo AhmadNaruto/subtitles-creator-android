@@ -73,6 +73,44 @@ fun TranscribingScreen(
                 color = MaterialTheme.colorScheme.primary
             )
 
+            // Stepper visual per tahapan proses
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val currentStageNum = when {
+                    state.transcribeStage.contains("1/3") -> 1
+                    state.transcribeStage.contains("2/3") -> 2
+                    state.transcribeStage.contains("3/3") -> 3
+                    else -> 1
+                }
+
+                SuggestionChip(
+                    onClick = {},
+                    label = { Text("1. Ekstraksi Audio", style = MaterialTheme.typography.labelSmall) },
+                    colors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = if (currentStageNum >= 1) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+                Spacer(Modifier.width(6.dp))
+                SuggestionChip(
+                    onClick = {},
+                    label = { Text("2. Model", style = MaterialTheme.typography.labelSmall) },
+                    colors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = if (currentStageNum >= 2) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+                Spacer(Modifier.width(6.dp))
+                SuggestionChip(
+                    onClick = {},
+                    label = { Text("3. Whisper AI", style = MaterialTheme.typography.labelSmall) },
+                    colors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = if (currentStageNum >= 3) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
 
             // Nama Tahapan Utama
@@ -93,7 +131,7 @@ fun TranscribingScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
 
             // Progress Bar: Indeterminate jika 0% (sedang ekstrak/loading), Determinate jika > 0%
             if (state.transcribeProgress == 0) {

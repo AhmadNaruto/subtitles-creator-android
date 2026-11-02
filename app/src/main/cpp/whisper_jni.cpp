@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <cstring>
 #include "whisper.h"
 
 #define LOG_TAG "WhisperJNI"
@@ -49,10 +50,39 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeInitContext(
 
     whisper_context_params cparams = whisper_context_default_params();
     cparams.use_gpu = false;
-    cparams.flash_attn = true;
-    // DTW disabled by default — split_on_word + max_len=1 gives native word segments
-    // which are already accurate. Enable DTW here if you want sub-token precision.
-    cparams.dtw_token_timestamps = false;
+    // DTW requires flash_attn = false in whisper.cpp, otherwise DTW is forcibly disabled.
+    cparams.flash_attn = false;
+    cparams.dtw_token_timestamps = true;
+
+    // Map model path/name to DTW alignment heads preset
+    std::string modelStr(path);
+    if (modelStr.find("tiny.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY_EN;
+    } else if (modelStr.find("tiny") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_TINY;
+    } else if (modelStr.find("base.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+    } else if (modelStr.find("base") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_BASE;
+    } else if (modelStr.find("small.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL_EN;
+    } else if (modelStr.find("small") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_SMALL;
+    } else if (modelStr.find("medium.en") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM_EN;
+    } else if (modelStr.find("medium") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_MEDIUM;
+    } else if (modelStr.find("turbo") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V3_TURBO;
+    } else if (modelStr.find("large-v3") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V3;
+    } else if (modelStr.find("large-v2") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V2;
+    } else if (modelStr.find("large") != std::string::npos) {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_LARGE_V1;
+    } else {
+        cparams.dtw_aheads_preset = WHISPER_AHEADS_N_TOP_MOST;
+    }
 
     whisper_context* ctx = whisper_init_from_file_with_params(path, cparams);
     env->ReleaseStringUTFChars(modelPath, path);
@@ -86,6 +116,7 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
         jstring language,
         jint nThreads,
         jboolean translate,
+        jstring vadModelPath,
         jobject progressCb) {
 
     auto* ctx = reinterpret_cast<whisper_context*>(ctxPtr);
@@ -100,6 +131,7 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
     jfloat* samples = env->GetFloatArrayElements(pcm, nullptr);
 
     const char* lang = env->GetStringUTFChars(language, nullptr);
+    const char* vadPath = vadModelPath ? env->GetStringUTFChars(vadModelPath, nullptr) : nullptr;
 
     whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     p.language          = lang;
@@ -113,14 +145,22 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
     p.single_segment    = false;
     p.suppress_blank    = true;
 
+    // === Native Voice Activity Detection (VAD) via whisper.cpp v1.9.5 ===
+    if (vadPath && std::strlen(vadPath) > 0) {
+        p.vad = true;
+        p.vad_model_path = vadPath;
+        p.vad_params = whisper_vad_default_params();
+        LOGI("nativeTranscribe: Native whisper.cpp VAD enabled with %s", vadPath);
+    } else {
+        p.vad = false;
+    }
+
     // === Speed optimizations for mobile inference ===
-    // Silero VAD already removes silence/noise chunks, so disabling temperature
-    // fallbacks prevents expensive multi-pass retries on degraded audio.
     p.no_fallback       = true;
     p.temperature_inc   = 0.0f;
     p.beam_search.beam_size = 1;
 
-    // === word-level timestamps: 1 segment per word with native start/end ===
+    // === word-level timestamps: 1 segment per word with native DTW start/end ===
     p.token_timestamps  = true;
     p.split_on_word     = true;
     p.max_len           = 1;
@@ -141,11 +181,14 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
     p.abort_callback = cancel_cb;
     p.abort_callback_user_data = nullptr;
 
-    LOGI("transcribe: samples=%d threads=%d lang=%s", nSamples, p.n_threads, lang);
+    LOGI("transcribe: samples=%d threads=%d lang=%s vad=%d", nSamples, p.n_threads, lang, p.vad);
     int rc = whisper_full(ctx, p, samples, nSamples);
 
     env->ReleaseFloatArrayElements(pcm, samples, JNI_ABORT);
     env->ReleaseStringUTFChars(language, lang);
+    if (vadModelPath && vadPath) {
+        env->ReleaseStringUTFChars(vadModelPath, vadPath);
+    }
 
     if (pstate.jcb) env->DeleteGlobalRef(pstate.jcb);
 

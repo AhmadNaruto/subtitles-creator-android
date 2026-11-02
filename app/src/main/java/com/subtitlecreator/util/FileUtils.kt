@@ -64,13 +64,21 @@ object FileUtils {
         return File(dir, "subtitled_${System.currentTimeMillis()}.mp4")
     }
 
+    fun outputMkvFile(context: Context): File {
+        val dir = File(context.filesDir, "output").apply { mkdirs() }
+        return File(dir, "subtitled_${System.currentTimeMillis()}.mkv")
+    }
+
     /** Save a rendered video to the user's public Movies/SubtitlesCreator/ folder (MediaStore on 29+). */
     fun saveToGallery(context: Context, source: File, displayName: String): Uri? {
         val resolver = context.contentResolver
+        val isMkv = displayName.endsWith(".mkv", ignoreCase = true) || source.name.endsWith(".mkv", ignoreCase = true)
+        val mimeType = if (isMkv) "video/x-matroska" else "video/mp4"
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/SubtitlesCreator")
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }

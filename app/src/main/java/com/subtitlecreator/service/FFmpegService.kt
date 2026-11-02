@@ -4,12 +4,14 @@ import android.content.Context
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
+import com.subtitlecreator.model.Subtitle
+import com.subtitlecreator.util.FileUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * FFmpeg wrapper: extract 16kHz mono PCM16 WAV (for Whisper).
+ * FFmpeg wrapper: extract 16kHz mono PCM16 WAV (for Whisper) & mux softsub into MKV container.
  */
 class FFmpegService(private val context: Context) {
 
@@ -28,6 +30,34 @@ class FFmpegService(private val context: Context) {
         }
         Log.i(TAG, "Extracted ${wavOut.length() / 1024} KB of PCM")
         wavOut
+    }
+
+    /**
+     * Mux video + audio + softsubtitles into an MKV container using stream copy (-c copy).
+     * Fast (seconds), zero quality loss, selectable subtitle track.
+     */
+    suspend fun embedSrtToMkv(
+        videoIn: File,
+        subtitles: List<Subtitle>,
+        mkvOut: File
+    ): File = withContext(Dispatchers.IO) {
+        if (mkvOut.exists()) mkvOut.delete()
+
+        val tempSrt = File(videoIn.parentFile ?: mkvOut.parentFile, "temp_${System.currentTimeMillis()}.srt")
+        try {
+            tempSrt.writeText(FileUtils.generateSrtContent(subtitles, groupIntoLines = true))
+
+            val cmd = "-y -i \"${videoIn.absolutePath}\" -i \"${tempSrt.absolutePath}\" -c copy -c:s srt \"${mkvOut.absolutePath}\""
+            val session = FFmpegKit.execute(cmd)
+            if (!ReturnCode.isSuccess(session.returnCode)) {
+                val logs = session.allLogsAsString.orEmpty()
+                error("FFmpeg embed MKV failed rc=${session.returnCode}\n$logs")
+            }
+            Log.i(TAG, "Embedded SRT into MKV: ${mkvOut.length() / 1024} KB")
+            mkvOut
+        } finally {
+            runCatching { if (tempSrt.exists()) tempSrt.delete() }
+        }
     }
 
     companion object {

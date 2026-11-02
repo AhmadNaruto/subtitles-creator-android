@@ -36,6 +36,8 @@ object PipelineStore {
         val translationTotal: Int = 0,
         val exporting: Boolean = false,
         val exportProgress: Int = 0,
+        val exportType: String = "mp4", // "mp4" or "mkv"
+        val exportDetail: String = "",
         val exportedFile: File? = null,
         val savedUri: Uri? = null,
         val subtitleFontSize: Int = 50,

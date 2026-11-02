@@ -111,6 +111,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
-    implementation(libs.onnxruntime.android)
     debugImplementation(libs.androidx.ui.tooling)
 }

@@ -89,10 +89,18 @@ fun AppNav(vm: AppViewModel) {
             )
         }
         composable(Routes.EDITOR) {
-            EditorScreen(state = state, vm = vm, onExport = {
-                vm.export()
-                nav.navigate(Routes.EXPORT)
-            })
+            EditorScreen(
+                state = state,
+                vm = vm,
+                onExportMp4 = {
+                    vm.export(com.subtitlecreator.service.PipelineService.EXPORT_TYPE_MP4)
+                    nav.navigate(Routes.EXPORT)
+                },
+                onExportMkv = {
+                    vm.export(com.subtitlecreator.service.PipelineService.EXPORT_TYPE_MKV)
+                    nav.navigate(Routes.EXPORT)
+                }
+            )
         }
         composable(Routes.EXPORT) {
             ExportScreen(

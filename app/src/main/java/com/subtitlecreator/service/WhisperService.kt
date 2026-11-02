@@ -25,12 +25,32 @@ class WhisperService(context: Context? = null) {
 
     private var ctxPtr: Long = 0L
     private var loadedModelPath: String? = null
-    private var vadDetector: SileroVadDetector? = context?.let { SileroVadDetector(it.applicationContext) }
+    private var appContext: Context? = context?.applicationContext
 
     fun setContext(context: Context) {
-        if (vadDetector == null) {
-            vadDetector = SileroVadDetector(context.applicationContext)
+        if (appContext == null) {
+            appContext = context.applicationContext
         }
+    }
+
+    private fun getNativeVadModelPath(): String? {
+        val ctx = appContext ?: return null
+        val target = File(ctx.filesDir, "models/ggml-silero-v6.2.0.bin")
+        if (!target.exists() || target.length() == 0L) {
+            target.parentFile?.mkdirs()
+            try {
+                ctx.assets.open("models/ggml-silero-v6.2.0.bin").use { input ->
+                    target.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Log.i(TAG, "Extracted native VAD model to ${target.absolutePath} (${target.length()} bytes)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Native VAD model not found in assets or failed to extract: ${e.message}")
+                return null
+            }
+        }
+        return if (target.exists() && target.length() > 0) target.absolutePath else null
     }
 
     fun ensureLoaded(modelFile: File) {
@@ -50,8 +70,6 @@ class WhisperService(context: Context? = null) {
             ctxPtr = 0L
             loadedModelPath = null
         }
-        vadDetector?.close()
-        vadDetector = null
     }
 
     suspend fun transcribe(
@@ -72,80 +90,28 @@ class WhisperService(context: Context? = null) {
         val durStr = if (min > 0) "${min}m ${sec}s" else "${sec}s"
         Log.i(TAG, "Decoded ${pcm.size} samples ($durStr)")
 
-        val raw: List<WhisperLib.RawSegment> = if (useVad && vadDetector != null) {
-            onStatusUpdate("Mendeteksi vokal dengan Silero VAD...")
-            val speechSegments = vadDetector?.detectSpeechSegments(pcm) ?: emptyList()
-            if (speechSegments.isNotEmpty()) {
-                val totalSpeechSamples = speechSegments.sumOf { (it.endSample - it.startSample).toLong() }
-                val totalSpeechSec = (totalSpeechSamples / 16000.0).toInt()
-                val savedPct = if (totalSec > 0) (((totalSec - totalSpeechSec) * 100) / totalSec).coerceAtLeast(0) else 0
-                val speechDurStr = if (totalSpeechSec >= 60) "${totalSpeechSec / 60}m ${totalSpeechSec % 60}s" else "${totalSpeechSec}s"
-                Log.i(TAG, "Silero VAD: speech duration $speechDurStr vs total $durStr (menghemat $savedPct% durasi hening)")
-                onStatusUpdate("Silero VAD: ${speechSegments.size} segmen bicara ditemukan (hemat $savedPct% hening)")
-
-                val collectedRaw = ArrayList<WhisperLib.RawSegment>()
-                var completedSamples = 0L
-
-                for ((idx, seg) in speechSegments.withIndex()) {
-                    val segSamples = seg.endSample - seg.startSample
-                    if (segSamples <= 0) continue
-
-                    val segPcm = pcm.copyOfRange(seg.startSample, seg.endSample)
-                    val segRaw = WhisperLib.transcribe(
-                        ctxPtr = ctxPtr,
-                        pcm = segPcm,
-                        language = language,
-                        nThreads = nThreads,
-                        translate = false,
-                        onProgress = { segProgress ->
-                            val currentSamples = (segProgress.toLong() * segSamples) / 100L
-                            val overallPct = if (totalSpeechSamples > 0) {
-                                (((completedSamples + currentSamples) * 100L) / totalSpeechSamples).toInt()
-                            } else {
-                                segProgress
-                            }
-                            onProgress(overallPct.coerceIn(0, 100))
-                            onStatusUpdate("Transkripsi segmen [${idx + 1}/${speechSegments.size}] ($speechDurStr vokal): $segProgress%")
-                        }
-                    )
-
-                    // Shift segment timestamps to video absolute time
-                    val offsetMs = seg.startMs
-                    for (r in segRaw) {
-                        collectedRaw.add(
-                            WhisperLib.RawSegment(
-                                text = r.text,
-                                startMs = r.startMs + offsetMs,
-                                endMs = r.endMs + offsetMs
-                            )
-                        )
-                    }
-                    completedSamples += segSamples
-                }
-                collectedRaw
-            } else {
-                Log.i(TAG, "Silero VAD tidak menemukan segmen vokal, fallback ke seluruh audio")
-                onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
-                WhisperLib.transcribe(
-                    ctxPtr = ctxPtr,
-                    pcm = pcm,
-                    language = language,
-                    nThreads = nThreads,
-                    translate = false,
-                    onProgress = onProgress
-                )
-            }
+        val vadPath = if (useVad) getNativeVadModelPath() else null
+        if (vadPath != null) {
+            onStatusUpdate("Mentranskripsi dengan Whisper AI + Native Silero VAD ($durStr audio)...")
+            Log.i(TAG, "Transcribing with native whisper.cpp VAD ($vadPath)")
         } else {
             onStatusUpdate("Menjalankan Whisper AI pada $durStr audio...")
-            WhisperLib.transcribe(
-                ctxPtr = ctxPtr,
-                pcm = pcm,
-                language = language,
-                nThreads = nThreads,
-                translate = false,
-                onProgress = onProgress
-            )
+            Log.i(TAG, "Transcribing continuous audio without VAD")
         }
+
+        val vadLabel = if (vadPath != null) " (Silero VAD)" else ""
+        val raw = WhisperLib.transcribe(
+            ctxPtr = ctxPtr,
+            pcm = pcm,
+            language = language,
+            nThreads = nThreads,
+            translate = false,
+            vadModelPath = vadPath,
+            onProgress = { p ->
+                onProgress(p)
+                onStatusUpdate("Mentranskripsi $durStr audio$vadLabel: $p%")
+            }
+        )
 
         // whisper's t0 marks where the word starts — trust it.
         // whisper's t1 often gets stretched to the next event (next word / end of

@@ -63,6 +63,7 @@ fun ExportScreen(
                 Text("Kembali ke Editor")
             }
         } else if (state.exporting) {
+            val isMkv = state.exportType.equals("mkv", ignoreCase = true)
             Text(
                 "${state.exportProgress}%",
                 style = MaterialTheme.typography.displayLarge,
@@ -70,8 +71,22 @@ fun ExportScreen(
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.height(16.dp))
-            Text("Burning subtitles into video", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(32.dp))
+            Text(
+                if (isMkv) "Menggabungkan Subtitle ke MKV" else "Membakar Subtitle ke Video MP4",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                state.exportDetail.ifEmpty {
+                    if (isMkv) "Menggabungkan softsub ke kontainer MKV via stream copy..."
+                    else "Merender video dengan subtitle..."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(28.dp))
             LinearProgressIndicator(
                 progress = { (state.exportProgress / 100f).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth().height(6.dp)
@@ -88,6 +103,7 @@ fun ExportScreen(
                 Text("Batalkan Export")
             }
         } else if (state.exportedFile != null) {
+            val isMkv = state.exportedFile.name.endsWith(".mkv", ignoreCase = true)
             Icon(
                 Icons.Default.CheckCircle,
                 null,
@@ -95,11 +111,15 @@ fun ExportScreen(
                 modifier = Modifier.size(80.dp)
             )
             Spacer(Modifier.height(16.dp))
-            Text("Selesai!", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (isMkv) "File MKV Selesai!" else "Video Selesai!",
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (state.savedUri != null) "Video tersimpan di Movies/SubtitlesCreator"
-                else "Video tersimpan: ${state.exportedFile.name}",
+                if (state.savedUri != null) "Tersimpan di Movies/SubtitlesCreator"
+                else "Tersimpan: ${state.exportedFile.name}",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

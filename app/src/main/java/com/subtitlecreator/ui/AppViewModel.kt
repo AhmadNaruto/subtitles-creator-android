@@ -229,10 +229,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun export() {
+    fun export(exportType: String = PipelineService.EXPORT_TYPE_MP4) {
         val video = state.value.videoFile ?: return
         if (state.value.subtitles.isEmpty()) return
-        startService(PipelineService.ACTION_EXPORT, video.absolutePath)
+        startService(
+            action = PipelineService.ACTION_EXPORT,
+            videoPath = video.absolutePath,
+            exportType = exportType
+        )
     }
 
     fun cancel() {
@@ -284,7 +288,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         action: String,
         videoPath: String? = null,
         modelId: String? = null,
-        language: String? = null
+        language: String? = null,
+        exportType: String? = null
     ) {
         val app = getApplication<Application>()
         val intent = Intent(app, PipelineService::class.java).apply {
@@ -292,6 +297,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             videoPath?.let { putExtra(PipelineService.EXTRA_VIDEO_PATH, it) }
             modelId?.let { putExtra(PipelineService.EXTRA_MODEL_ID, it) }
             language?.let { putExtra(PipelineService.EXTRA_LANGUAGE, it) }
+            exportType?.let { putExtra(PipelineService.EXTRA_EXPORT_TYPE, it) }
         }
         ContextCompat.startForegroundService(app, intent)
     }

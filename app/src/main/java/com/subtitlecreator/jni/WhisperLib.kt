@@ -24,6 +24,7 @@ object WhisperLib {
         language: String,
         nThreads: Int,
         translate: Boolean,
+        vadModelPath: String?,
         progressCb: ProgressCallback?
     ): Array<String>?
     private external fun nativeCancel()
@@ -48,6 +49,7 @@ object WhisperLib {
         language: String = "auto",
         nThreads: Int = 4,
         translate: Boolean = false,
+        vadModelPath: String? = null,
         onProgress: ((Int) -> Unit)? = null
     ): List<RawSegment> {
         isCancelled = false
@@ -58,7 +60,7 @@ object WhisperLib {
                 }
             }
         }
-        val flat = nativeTranscribe(ctxPtr, pcm, language, nThreads, translate, cb)
+        val flat = nativeTranscribe(ctxPtr, pcm, language, nThreads, translate, vadModelPath, cb)
         if (flat == null) {
             if (isCancelled) {
                 throw java.util.concurrent.CancellationException("Whisper transcription was cancelled")

@@ -156,7 +156,6 @@ Java_com_subtitlecreator_jni_WhisperLib_nativeTranscribe(
     }
 
     // === Speed optimizations for mobile inference ===
-    p.no_fallback       = true;
     p.temperature_inc   = 0.0f;
     p.beam_search.beam_size = 1;
 

@@ -43,20 +43,53 @@ object FileUtils {
 
     data class VideoDimensions(val widthPx: Int, val heightPx: Int)
 
-    /** Read display dimensions (post-rotation) from a video file. */
-    fun videoDimensions(file: File): VideoDimensions {
+    data class VideoOrientationInfo(
+        val rawWidth: Int,
+        val rawHeight: Int,
+        val rotationDegrees: Int,
+        val displayWidth: Int,
+        val displayHeight: Int,
+        val isVertical: Boolean
+    )
+
+    /**
+     * Inspect full video orientation, dimensions, and rotation metadata.
+     * Determines whether the video is vertical (portrait, displayHeight >= displayWidth).
+     */
+    fun getVideoOrientation(file: File): VideoOrientationInfo {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
             val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1920
             val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
             val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            if (rot == 90 || rot == 270) VideoDimensions(h, w) else VideoDimensions(w, h)
+            val (dw, dh) = if (rot == 90 || rot == 270) Pair(h, w) else Pair(w, h)
+            VideoOrientationInfo(
+                rawWidth = w,
+                rawHeight = h,
+                rotationDegrees = rot,
+                displayWidth = dw,
+                displayHeight = dh,
+                isVertical = dh >= dw
+            )
         } catch (t: Throwable) {
-            VideoDimensions(1920, 1080)
+            VideoOrientationInfo(
+                rawWidth = 1920,
+                rawHeight = 1080,
+                rotationDegrees = 0,
+                displayWidth = 1920,
+                displayHeight = 1080,
+                isVertical = false
+            )
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    /** Read display dimensions (post-rotation) from a video file. */
+    fun videoDimensions(file: File): VideoDimensions {
+        val info = getVideoOrientation(file)
+        return VideoDimensions(info.displayWidth, info.displayHeight)
     }
 
     fun outputVideoFile(context: Context): File {
@@ -230,5 +263,23 @@ object FileUtils {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "Bagikan Subtitle (.srt)"))
+    }
+
+    /** Share exported video to external apps (WhatsApp, Instagram, Telegram, etc.) */
+    fun shareVideoFile(context: Context, uri: Uri?, file: File?) {
+        val shareUri = uri ?: file?.let {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+        } ?: return
+        val isMkv = file?.name?.endsWith(".mkv", ignoreCase = true) == true
+        val mimeType = if (isMkv) "video/x-matroska" else "video/mp4"
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, shareUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "Bagikan Video Subtitle").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
     }
 }

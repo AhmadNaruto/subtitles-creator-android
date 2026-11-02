@@ -175,11 +175,22 @@ fun HomeScreen(
                     Icon(Icons.Default.VideoLibrary, null)
                     Text("Pilih Video", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
-                Text(
-                    state.videoFile?.name ?: "Belum ada video yang dipilih",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        state.videoFile?.name ?: "Belum ada video yang dipilih",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.videoFile != null && state.videoWidthPx > 0 && state.videoHeightPx > 0) {
+                        val isVertical = state.videoHeightPx >= state.videoWidthPx
+                        Text(
+                            text = "${state.videoWidthPx} × ${state.videoHeightPx} • ${if (isVertical) "📱 Orientasi Vertikal (Portrait)" else "🖥️ Orientasi Horizontal (Landscape)"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
                 OutlinedButton(
                     onClick = {
                         videoPicker.launch(

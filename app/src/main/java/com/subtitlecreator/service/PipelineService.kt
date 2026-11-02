@@ -249,6 +249,10 @@ class PipelineService : Service() {
                 updateNotification(if (isMkv) "Embedding MKV subtitles…" else "Burning subtitles…", 0)
 
                 val video = File(videoPath)
+                val orientation = FileUtils.getVideoOrientation(video)
+                val orientDesc = if (orientation.isVertical) "Vertikal (${orientation.displayWidth}×${orientation.displayHeight})" else "Horizontal (${orientation.displayWidth}×${orientation.displayHeight})"
+                Log.i(TAG, "Starting export. Input video orientation: $orientDesc, rot=${orientation.rotationDegrees}")
+
                 val out = if (isMkv) {
                     FileUtils.outputMkvFile(applicationContext)
                 } else {
@@ -256,13 +260,13 @@ class PipelineService : Service() {
                 }
 
                 if (isMkv) {
-                    PipelineStore.update { it.copy(exportProgress = 25, exportDetail = "Membuat stream softsub SRT & multiplexing MKV...") }
+                    PipelineStore.update { it.copy(exportProgress = 25, exportDetail = "Membuat softsub SRT & multiplexing MKV ($orientDesc)...") }
                     ffmpeg.embedSrtToMkv(videoIn = video, subtitles = subs, mkvOut = out)
                     PipelineStore.update { it.copy(exportProgress = 90, exportDetail = "Menyimpan file MKV ke galeri...") }
                 } else {
                     val cur = PipelineStore.current()
                     val fontSize = cur.subtitleFontSize
-                    val baseHeight = cur.videoHeightPx.takeIf { it > 0 } ?: 1080
+                    val baseHeight = orientation.displayHeight.takeIf { it > 0 } ?: cur.videoHeightPx.takeIf { it > 0 } ?: 1080
                     val pxSize = ((fontSize * 2f) * (baseHeight / 1080f)).toInt().coerceIn(36, 600)
                     burner.burn(
                         videoIn = video,
@@ -273,14 +277,14 @@ class PipelineService : Service() {
                         colorHex = cur.subtitleColorHex,
                         isUppercase = cur.isUppercase
                     ) { p ->
-                        PipelineStore.update { it.copy(exportProgress = p, exportDetail = "Merender video dengan subtitle: $p%") }
+                        PipelineStore.update { it.copy(exportProgress = p, exportDetail = "Merender video $orientDesc dengan subtitle: $p%") }
                         updateNotification("Exporting MP4 $p%", p)
                     }
                 }
 
                 val uri = FileUtils.saveToGallery(applicationContext, out, out.name)
-                // Delete internal temporary file now that it is safely copied to public Movies gallery
-                runCatching { out.delete() }
+                // Retain out file so the preview player and direct sharing can access it reliably.
+                // Older temp files are safely pruned by cleanupTempFiles (keeps latest 2).
                 FileUtils.cleanupTempFiles(applicationContext, maxKeep = 2)
 
                 PipelineStore.update {

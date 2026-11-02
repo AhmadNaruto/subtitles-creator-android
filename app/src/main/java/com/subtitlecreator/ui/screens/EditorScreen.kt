@@ -106,11 +106,13 @@ fun EditorScreen(
                 .padding(innerPadding)
         ) {
         // Video Preview Player Box
-        Box(
+        // Video Preview Player Box
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(0.48f)
-                .background(Color.Black)
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
         ) {
             AndroidView(
                 factory = { ctx ->
@@ -122,17 +124,39 @@ fun EditorScreen(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Dynamic Subtitle Overlay
+            // Dynamic Subtitle Overlay fitted to actual video display area
             if (activeText.isNotEmpty()) {
                 val density = LocalDensity.current
+                val containerWidth = maxWidth
+                val containerHeight = maxHeight
+
+                val videoAspect = if (state.videoWidthPx > 0 && state.videoHeightPx > 0) {
+                    state.videoWidthPx.toFloat() / state.videoHeightPx.toFloat()
+                } else {
+                    16f / 9f
+                }
+                val containerAspect = containerWidth / containerHeight
+
+                val (videoDisplayWidth, videoDisplayHeight) = if (containerAspect > videoAspect) {
+                    // Pillarboxed (e.g. vertical 9:16 video): constrained by height
+                    Pair(containerHeight * videoAspect, containerHeight)
+                } else {
+                    // Letterboxed (e.g. horizontal 16:9 video): constrained by width
+                    Pair(containerWidth, containerWidth / videoAspect)
+                }
+
                 val fontSizeSp = (state.subtitleFontSize * 0.35f).coerceIn(14f, 56f).sp
                 val shadowRadiusPx = with(density) { (fontSizeSp * 0.10f).toPx() }
                 val shadowDxPx = with(density) { (fontSizeSp * 0.035f).toPx() }
                 val shadowDyPx = with(density) { (fontSizeSp * 0.065f).toPx() }
                 val shadowBlurPx = shadowRadiusPx.coerceAtLeast(1f)
 
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val boxHeightPx = with(density) { maxHeight.toPx() }
+                Box(
+                    modifier = Modifier
+                        .size(videoDisplayWidth, videoDisplayHeight)
+                        .align(Alignment.Center)
+                ) {
+                    val boxHeightPx = with(density) { videoDisplayHeight.toPx() }
                     val yOffset = with(density) {
                         (boxHeightPx * state.subtitlePositionFraction).toDp()
                     }
@@ -182,8 +206,10 @@ fun EditorScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            val isVertical = state.videoHeightPx >= state.videoWidthPx && state.videoHeightPx > 0
+            val orientBadge = if (isVertical) "📱 Vertikal" else "🖥️ Horizontal"
             Text(
-                "${state.subtitles.size} kata",
+                "${state.subtitles.size} kata • $orientBadge",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)

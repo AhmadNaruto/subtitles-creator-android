@@ -64,6 +64,9 @@ class SubtitleBurner(private val context: Context) {
     ): File = withContext(Dispatchers.Main) {
         if (videoOut.exists()) videoOut.delete()
 
+        val orientation = com.subtitlecreator.util.FileUtils.getVideoOrientation(videoIn)
+        Log.i(TAG, "Checking video orientation before burn: raw=${orientation.rawWidth}x${orientation.rawHeight}, rot=${orientation.rotationDegrees}, display=${orientation.displayWidth}x${orientation.displayHeight}, isVertical=${orientation.isVertical}")
+
         val overlay = SubtitleBitmapOverlay(subtitles, fontSize, montserrat, positionFraction, colorHex, isUppercase)
         val overlayEffect: Effect = OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(overlay))
 
@@ -76,11 +79,22 @@ class SubtitleBurner(private val context: Context) {
 
         val done = CompletableDeferred<File>()
 
-        val transformer = Transformer.Builder(context)
+        val transformerBuilder = Transformer.Builder(context)
             .setEncoderFactory(DefaultEncoderFactory.Builder(context).build())
+
+        // Ensure vertical video output remains vertical
+        if (orientation.isVertical) {
+            transformerBuilder.setPortraitEncodingEnabled(true)
+        }
+
+        val transformer = transformerBuilder
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, result: ExportResult) {
-                    Log.i(TAG, "Export done: ${videoOut.length() / 1024} KB")
+                    val outOrientation = com.subtitlecreator.util.FileUtils.getVideoOrientation(videoOut)
+                    Log.i(TAG, "Export done: ${videoOut.length() / 1024} KB. Output orientation: display=${outOrientation.displayWidth}x${outOrientation.displayHeight}, rot=${outOrientation.rotationDegrees}, isVertical=${outOrientation.isVertical}")
+                    if (orientation.isVertical && !outOrientation.isVertical) {
+                        Log.w(TAG, "WARNING: Input was vertical but output is not vertical!")
+                    }
                     onProgress(100)
                     done.complete(videoOut)
                 }

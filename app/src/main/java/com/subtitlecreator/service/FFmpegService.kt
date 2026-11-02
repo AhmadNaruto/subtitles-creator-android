@@ -43,17 +43,37 @@ class FFmpegService(private val context: Context) {
     ): File = withContext(Dispatchers.IO) {
         if (mkvOut.exists()) mkvOut.delete()
 
+        val orientation = FileUtils.getVideoOrientation(videoIn)
+        Log.i(TAG, "embedSrtToMkv video orientation: raw=${orientation.rawWidth}x${orientation.rawHeight}, rot=${orientation.rotationDegrees}, display=${orientation.displayWidth}x${orientation.displayHeight}, isVertical=${orientation.isVertical}")
+
         val tempSrt = File(videoIn.parentFile ?: mkvOut.parentFile, "temp_${System.currentTimeMillis()}.srt")
         try {
             tempSrt.writeText(FileUtils.generateSrtContent(subtitles, groupIntoLines = true))
 
-            val cmd = "-y -i \"${videoIn.absolutePath}\" -i \"${tempSrt.absolutePath}\" -c copy -c:s srt \"${mkvOut.absolutePath}\""
-            val session = FFmpegKit.execute(cmd)
+            val rotArgs = if (orientation.rotationDegrees != 0) {
+                "-map_metadata 0 -metadata:s:v:0 rotate=${orientation.rotationDegrees} -display_rotation:v:0 ${orientation.rotationDegrees}"
+            } else {
+                "-map_metadata 0"
+            }
+            val cmd = "-y -i \"${videoIn.absolutePath}\" -i \"${tempSrt.absolutePath}\" $rotArgs -c copy -c:s srt \"${mkvOut.absolutePath}\""
+            var session = FFmpegKit.execute(cmd)
+            if (!ReturnCode.isSuccess(session.returnCode) && orientation.rotationDegrees != 0) {
+                // Fallback without display_rotation flag if not supported
+                val fallbackCmd = "-y -i \"${videoIn.absolutePath}\" -i \"${tempSrt.absolutePath}\" -map_metadata 0 -metadata:s:v:0 rotate=${orientation.rotationDegrees} -c copy -c:s srt \"${mkvOut.absolutePath}\""
+                session = FFmpegKit.execute(fallbackCmd)
+            }
+
             if (!ReturnCode.isSuccess(session.returnCode)) {
                 val logs = session.allLogsAsString.orEmpty()
                 error("FFmpeg embed MKV failed rc=${session.returnCode}\n$logs")
             }
-            Log.i(TAG, "Embedded SRT into MKV: ${mkvOut.length() / 1024} KB")
+
+            val outOrientation = FileUtils.getVideoOrientation(mkvOut)
+            Log.i(TAG, "Embedded SRT into MKV: ${mkvOut.length() / 1024} KB. Output orientation: display=${outOrientation.displayWidth}x${outOrientation.displayHeight}, isVertical=${outOrientation.isVertical}")
+            if (orientation.isVertical && !outOrientation.isVertical) {
+                Log.w(TAG, "WARNING: Input video was vertical, but MKV output orientation is not detected as vertical!")
+            }
+
             mkvOut
         } finally {
             runCatching { if (tempSrt.exists()) tempSrt.delete() }

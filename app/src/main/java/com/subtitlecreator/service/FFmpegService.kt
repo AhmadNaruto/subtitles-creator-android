@@ -48,7 +48,7 @@ class FFmpegService(private val context: Context) {
 
         val tempSrt = File(videoIn.parentFile ?: mkvOut.parentFile, "temp_${System.currentTimeMillis()}.srt")
         try {
-            tempSrt.writeText(FileUtils.generateSrtContent(subtitles, groupIntoLines = true))
+            tempSrt.writeText(FileUtils.generateSrtContent(subtitles, groupIntoLines = false))
 
             val rotArgs = if (orientation.rotationDegrees != 0) {
                 "-map_metadata 0 -metadata:s:v:0 rotate=${orientation.rotationDegrees} -display_rotation:v:0 ${orientation.rotationDegrees}"

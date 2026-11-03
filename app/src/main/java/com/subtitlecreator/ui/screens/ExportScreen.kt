@@ -1,6 +1,8 @@
 package com.subtitlecreator.ui.screens
 
+import android.view.LayoutInflater
 import android.widget.Toast
+import com.subtitlecreator.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +51,10 @@ fun ExportScreen(
     val player = remember(exportUri) {
         exportUri?.let { uri ->
             ExoPlayer.Builder(context).build().apply {
+                trackSelectionParameters = trackSelectionParameters
+                    .buildUpon()
+                    .setSelectUndeterminedTextLanguage(true)
+                    .build()
                 setMediaItem(MediaItem.fromUri(uri))
                 prepare()
             }
@@ -153,10 +159,9 @@ fun ExportScreen(
                 if (player != null) {
                     AndroidView(
                         factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                this.player = player
-                                useController = true
-                            }
+                            val pv = LayoutInflater.from(ctx).inflate(R.layout.player_view_texture, null, false) as PlayerView
+                            pv.player = player
+                            pv
                         },
                         modifier = Modifier.fillMaxSize()
                     )

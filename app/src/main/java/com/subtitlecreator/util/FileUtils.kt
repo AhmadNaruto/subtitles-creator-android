@@ -144,7 +144,7 @@ object FileUtils {
      * Converts a list of Subtitles to standard .srt format string.
      * @param groupIntoLines When true, groups consecutive words into natural subtitle sentences.
      */
-    fun generateSrtContent(subtitles: List<Subtitle>, groupIntoLines: Boolean = true): String {
+    fun generateSrtContent(subtitles: List<Subtitle>, groupIntoLines: Boolean = false): String {
         if (subtitles.isEmpty()) return ""
         val sb = StringBuilder()
 
@@ -221,7 +221,7 @@ object FileUtils {
     }
 
     /** Save .srt file to Downloads/SubtitlesCreator */
-    fun saveSrtToDownloads(context: Context, subtitles: List<Subtitle>, baseName: String, groupIntoLines: Boolean = true): Uri? {
+    fun saveSrtToDownloads(context: Context, subtitles: List<Subtitle>, baseName: String, groupIntoLines: Boolean = false): Uri? {
         val srtContent = generateSrtContent(subtitles, groupIntoLines)
         val fileName = "${baseName.substringBeforeLast(".")}.srt"
         val resolver = context.contentResolver
@@ -249,7 +249,7 @@ object FileUtils {
     }
 
     /** Share .srt file to other apps (WhatsApp, Telegram, Drive, etc.) */
-    fun shareSrtFile(context: Context, subtitles: List<Subtitle>, baseName: String, groupIntoLines: Boolean = true) {
+    fun shareSrtFile(context: Context, subtitles: List<Subtitle>, baseName: String, groupIntoLines: Boolean = false) {
         val srtContent = generateSrtContent(subtitles, groupIntoLines)
         val fileName = "${baseName.substringBeforeLast(".")}.srt"
         val cacheFile = File(context.cacheDir, fileName)

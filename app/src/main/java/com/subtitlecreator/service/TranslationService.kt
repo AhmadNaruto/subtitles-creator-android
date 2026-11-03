@@ -54,8 +54,13 @@ class TranslationService {
             for (i in chunk.indices) {
                 val phrase = chunk[i]
                 val translatedSentence = translatedSentences.getOrNull(i)?.ifEmpty { null } ?: phrase.sentenceText
-                val distributedSubs = distributeWordsTiming(phrase, translatedSentence, targetLang)
-                result.addAll(distributedSubs)
+                result.add(
+                    Subtitle(
+                        text = translatedSentence,
+                        startMs = phrase.startMs,
+                        endMs = phrase.endMs
+                    )
+                )
 
                 processedOriginalCount += phrase.originalSubs.size
                 onProgress(processedOriginalCount.coerceAtMost(subtitles.size), subtitles.size)

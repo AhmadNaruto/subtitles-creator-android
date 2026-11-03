@@ -119,10 +119,11 @@ class WhisperService(context: Context? = null) {
         // Cap each word's duration to a per-character budget.
         val merged = mergeCompoundFragments(raw)
         val sanitized = sanitizeAndCapTimestamps(merged)
+        val phrases = groupWordsIntoPhrases(sanitized)
 
         TranscriptionResult(
             language = language,
-            subtitles = sanitized
+            subtitles = phrases
         )
     }
 
@@ -237,6 +238,104 @@ class WhisperService(context: Context? = null) {
 
             out += Subtitle(text = text, startMs = cleanStart, endMs = cleanEnd)
         }
+        return out
+    }
+
+    /**
+     * Groups individual word-level subtitles into natural, readable subtitle phrases/sentences.
+     *
+     * Adheres to professional subtitling guidelines (Netflix / BBC / EBU standards):
+     * 1. Max length: ~32-38 characters per phrase (keeps text concise and readable).
+     * 2. Max words: 4-7 words per phrase (avoids long cognitive chunks).
+     * 3. Max duration: 3.5 to 4.0 seconds max per phrase.
+     * 4. Split on natural pauses: Silence gap >= 380 ms between words triggers a break.
+     * 5. Split on linguistic boundaries: Sentence-ending punctuation (. ? ! ... or Asian equivalents)
+     *    or clause markers (, ; : -) when phrase has reasonable length (>= 3 words).
+     * 6. Minimum display time: At least 1000ms duration (or until next speech starts) to prevent visual flashing.
+     */
+    private fun groupWordsIntoPhrases(
+        words: List<Subtitle>,
+        maxChars: Int = 36,
+        maxWords: Int = 7,
+        maxDurationMs: Long = 4000L,
+        pauseThresholdMs: Long = 380L,
+        minDurationMs: Long = 1000L
+    ): List<Subtitle> {
+        if (words.isEmpty()) return emptyList()
+
+        val out = ArrayList<Subtitle>()
+        val currentGroup = ArrayList<Subtitle>()
+
+        fun flushGroup(nextWordStartMs: Long?) {
+            if (currentGroup.isEmpty()) return
+            val phraseText = currentGroup.joinToString(" ") { it.text.trim() }.replace("  ", " ").trim()
+            if (phraseText.isNotEmpty()) {
+                val start = currentGroup.first().startMs
+                var end = currentGroup.last().endMs
+
+                // Ensure comfortable reading duration (Netflix minimum ~833-1000ms)
+                if (end - start < minDurationMs) {
+                    end = start + minDurationMs
+                }
+
+                // Prevent overlapping with the start of the next subtitle card
+                if (nextWordStartMs != null && nextWordStartMs > start) {
+                    end = minOf(end, nextWordStartMs)
+                }
+
+                if (end <= start) {
+                    end = start + 300L
+                }
+
+                out.add(Subtitle(text = phraseText, startMs = start, endMs = end))
+            }
+            currentGroup.clear()
+        }
+
+        for (i in words.indices) {
+            val word = words[i]
+            val text = word.text.trim()
+            if (text.isEmpty()) continue
+
+            if (currentGroup.isEmpty()) {
+                currentGroup.add(word)
+            } else {
+                val prevWord = currentGroup.last()
+                val gap = word.startMs - prevWord.endMs
+                val prevText = prevWord.text.trim()
+
+                // Condition 1: Natural silence pause between words
+                val isPause = gap >= pauseThresholdMs
+
+                // Condition 2: Sentence-ending punctuation
+                val isTerminalPunctuation = prevText.endsWith(".") || prevText.endsWith("?") ||
+                        prevText.endsWith("!") || prevText.endsWith("...") ||
+                        prevText.endsWith("。") || prevText.endsWith("？") || prevText.endsWith("！")
+
+                // Condition 3: Clause punctuation (, ; : -) if phrase already has at least 3 words
+                val isClauseBreak = (prevText.endsWith(",") || prevText.endsWith(";") ||
+                        prevText.endsWith(":") || prevText.endsWith("-") || prevText.endsWith("，")) &&
+                        currentGroup.size >= 3
+
+                // Condition 4: Character count limit
+                val totalCharsWithCandidate = currentGroup.sumOf { it.text.length } + currentGroup.size + text.length
+                val isTooLong = totalCharsWithCandidate > maxChars
+
+                // Condition 5: Word count limit
+                val isTooManyWords = currentGroup.size >= maxWords
+
+                // Condition 6: Total duration limit
+                val groupDuration = word.endMs - currentGroup.first().startMs
+                val isTooLongDuration = groupDuration > maxDurationMs
+
+                if (isPause || isTerminalPunctuation || isClauseBreak || isTooLong || isTooManyWords || isTooLongDuration) {
+                    flushGroup(nextWordStartMs = word.startMs)
+                }
+                currentGroup.add(word)
+            }
+        }
+
+        flushGroup(nextWordStartMs = null)
         return out
     }
 

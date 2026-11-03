@@ -67,7 +67,15 @@ class SubtitleBurner(private val context: Context) {
         val orientation = com.subtitlecreator.util.FileUtils.getVideoOrientation(videoIn)
         Log.i(TAG, "Checking video orientation before burn: raw=${orientation.rawWidth}x${orientation.rawHeight}, rot=${orientation.rotationDegrees}, display=${orientation.displayWidth}x${orientation.displayHeight}, isVertical=${orientation.isVertical}")
 
-        val overlay = SubtitleBitmapOverlay(subtitles, fontSize, montserrat, positionFraction, colorHex, isUppercase)
+        val overlay = SubtitleBitmapOverlay(
+            subs = subtitles,
+            fontSizePx = fontSize,
+            typeface = montserrat,
+            positionFraction = positionFraction,
+            colorHex = colorHex,
+            isUppercase = isUppercase,
+            videoWidth = orientation.displayWidth
+        )
         val overlayEffect: Effect = OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(overlay))
 
         val edited = EditedMediaItem.Builder(MediaItem.fromUri(videoIn.toURI().toString()))
@@ -129,7 +137,8 @@ class SubtitleBurner(private val context: Context) {
         private val typeface: Typeface,
         private val positionFraction: Float,
         private val colorHex: String = "#FFD400",
-        private val isUppercase: Boolean = false
+        private val isUppercase: Boolean = false,
+        private val videoWidth: Int = 1080
     ) : BitmapOverlay() {
 
         // positionFraction = 0 → top of video, 1 → bottom. Media3 anchor Y is NDC (1=top, -1=bottom).
@@ -205,25 +214,60 @@ class SubtitleBurner(private val context: Context) {
             cache[text]?.let { return it }
 
             // Horizontal padding accommodates the shadow's dx + blur on both sides.
-            // Top padding is deliberately minimal (just enough to avoid clipping the
-            // shadow's ≈0.035 × fontSize upward extension) so the glyph top sits flush
-            // with the bitmap top — this is what lets the Compose preview and the burned
-            // output land at the same on-screen position.
             val paddingX = (fontSizePx * 0.35f).toInt()
             val paddingTop = (fontSizePx * 0.05f).toInt().coerceAtLeast(2)
             val paddingBottom = (fontSizePx * 0.35f).toInt()
-            val textWidth = paint.measureText(text).toInt() + paddingX * 2
-            val fm = paint.fontMetrics
-            val textHeight = (fm.descent - fm.ascent).toInt() + paddingTop + paddingBottom
 
-            val bitmap = Bitmap.createBitmap(textWidth.coerceAtLeast(2), textHeight.coerceAtLeast(2), Bitmap.Config.ARGB_8888)
+            val maxLineWidth = (videoWidth * 0.88f).coerceAtLeast(200f)
+            val lines = wrapTextToLines(text, paint, maxLineWidth)
+            val maxLineMeasuredWidth = lines.maxOfOrNull { paint.measureText(it) } ?: 0f
+            val textWidth = (maxLineMeasuredWidth + paddingX * 2).toInt().coerceAtLeast(2)
+
+            val fm = paint.fontMetrics
+            val lineHeight = (fm.descent - fm.ascent) * 1.15f
+            val textHeight = (lineHeight * lines.size + paddingTop + paddingBottom).toInt().coerceAtLeast(2)
+
+            val bitmap = Bitmap.createBitmap(textWidth, textHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
-            val baseline = paddingTop - fm.ascent
-            canvas.drawText(text, paddingX.toFloat(), baseline, paint)
+
+            for (i in lines.indices) {
+                val line = lines[i]
+                val lineWidth = paint.measureText(line)
+                val lineX = paddingX + (maxLineMeasuredWidth - lineWidth) / 2f
+                val lineY = paddingTop - fm.ascent + (i * lineHeight)
+                canvas.drawText(line, lineX, lineY, paint)
+            }
 
             if (cache.size >= cacheMax) cache.entries.iterator().next().let { cache.remove(it.key) }
             cache[text] = bitmap
             return bitmap
+        }
+
+        private fun wrapTextToLines(text: String, paint: TextPaint, maxWidth: Float): List<String> {
+            if (paint.measureText(text) <= maxWidth || !text.contains(" ")) {
+                return listOf(text)
+            }
+            val words = text.split("\\s+".toRegex()).filter { it.isNotEmpty() }
+            val lines = mutableListOf<String>()
+            var currentLine = StringBuilder()
+
+            for (word in words) {
+                if (currentLine.isEmpty()) {
+                    currentLine.append(word)
+                } else {
+                    val candidate = "$currentLine $word"
+                    if (paint.measureText(candidate) <= maxWidth) {
+                        currentLine.append(" ").append(word)
+                    } else {
+                        lines.add(currentLine.toString())
+                        currentLine = StringBuilder(word)
+                    }
+                }
+            }
+            if (currentLine.isNotEmpty()) {
+                lines.add(currentLine.toString())
+            }
+            return lines
         }
 
         @androidx.media3.common.util.UnstableApi

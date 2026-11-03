@@ -1,7 +1,10 @@
 package com.subtitlecreator.ui.screens
 
 import android.graphics.Typeface as AndroidTypeface
+import android.view.LayoutInflater
 import android.widget.Toast
+import com.subtitlecreator.R
+import androidx.media3.exoplayer.SeekParameters
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,6 +69,7 @@ fun EditorScreen(
 
     val player = remember(state.videoFile) {
         ExoPlayer.Builder(context).build().apply {
+            setSeekParameters(SeekParameters.EXACT)
             state.videoFile?.let {
                 setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(it)))
                 prepare()
@@ -75,20 +79,39 @@ fun EditorScreen(
     DisposableEffect(player) { onDispose { player.release() } }
 
     var positionMs by remember { mutableLongStateOf(0L) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var selectedSubtitleIndex by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(player) {
         while (true) {
             positionMs = player.currentPosition
+            isPlaying = player.isPlaying
             delay(30)
         }
     }
-    val activeIndex = remember(state.subtitles, positionMs) {
+
+    val currentSpokenIndex = remember(state.subtitles, positionMs) {
         state.subtitles.indexOfFirst { positionMs in it.startMs..it.endMs }
+    }
+
+    LaunchedEffect(currentSpokenIndex) {
+        if (currentSpokenIndex >= 0) {
+            selectedSubtitleIndex = currentSpokenIndex
+        }
+    }
+
+    // When playing: show the actively spoken subtitle.
+    // When paused/stopped: show selected subtitle so user can preview and style it.
+    val activeIndex = when {
+        currentSpokenIndex >= 0 -> currentSpokenIndex
+        !isPlaying && state.subtitles.isNotEmpty() -> selectedSubtitleIndex.coerceIn(0, state.subtitles.lastIndex)
+        else -> -1
     }
     val activeText = state.subtitles.getOrNull(activeIndex)?.text ?: ""
 
     val listState = rememberLazyListState()
-    LaunchedEffect(activeIndex) {
-        if (activeIndex >= 0) listState.animateScrollToItem(activeIndex)
+    LaunchedEffect(currentSpokenIndex) {
+        if (currentSpokenIndex >= 0) listState.animateScrollToItem(currentSpokenIndex)
     }
 
     val montserratFamily = remember {
@@ -106,7 +129,6 @@ fun EditorScreen(
                 .padding(innerPadding)
         ) {
         // Video Preview Player Box
-        // Video Preview Player Box
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,10 +138,9 @@ fun EditorScreen(
         ) {
             AndroidView(
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        this.player = player
-                        useController = true
-                    }
+                    val pv = LayoutInflater.from(ctx).inflate(R.layout.player_view_texture, null, false) as PlayerView
+                    pv.player = player
+                    pv
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -209,7 +230,7 @@ fun EditorScreen(
             val isVertical = state.videoHeightPx >= state.videoWidthPx && state.videoHeightPx > 0
             val orientBadge = if (isVertical) "📱 Vertikal" else "🖥️ Horizontal"
             Text(
-                "${state.subtitles.size} kata • $orientBadge",
+                "${state.subtitles.size} subtitle • $orientBadge",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
@@ -352,7 +373,10 @@ fun EditorScreen(
                     sub = sub,
                     isActive = idx == activeIndex,
                     canMerge = idx < state.subtitles.lastIndex,
-                    onClick = { player.seekTo(sub.startMs) },
+                    onClick = {
+                        selectedSubtitleIndex = idx
+                        player.seekTo(sub.startMs + 50L)
+                    },
                     onTextChange = { vm.updateSubtitle(idx, text = it) },
                     onDelete = {
                         val deleted = vm.deleteSubtitle(idx)
@@ -507,7 +531,8 @@ private fun SubtitleRow(
                     value = sub.text,
                     onValueChange = onTextChange,
                     modifier = Modifier.weight(1f),
-                    singleLine = true
+                    singleLine = false,
+                    maxLines = 3
                 )
                 IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Add, contentDescription = "Add after", modifier = Modifier.size(18.dp))

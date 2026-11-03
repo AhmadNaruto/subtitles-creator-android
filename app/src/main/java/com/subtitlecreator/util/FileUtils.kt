@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import com.subtitlecreator.model.Subtitle
 import java.io.File
@@ -32,13 +33,34 @@ object FileUtils {
         }
     }
 
-    fun copyUriToAppStorage(context: Context, uri: Uri, fileName: String): File {
-        cleanupTempFiles(context, maxKeep = 2)
+    fun copyUriToAppStorage(context: Context, uri: Uri, fileName: String, cleanOld: Boolean = false): File {
+        if (cleanOld) {
+            cleanupTempFiles(context, maxKeep = 2)
+        }
         val out = File(context.filesDir, "videos").apply { mkdirs() }.resolve(fileName)
         context.contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { input.copyTo(it) }
         } ?: error("Cannot open $uri")
         return out
+    }
+
+    fun getFileName(context: Context, uri: Uri): String {
+        var name = "video_${System.currentTimeMillis()}.mp4"
+        if (uri.scheme == "content") {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx != -1) {
+                        name = cursor.getString(idx) ?: name
+                    }
+                }
+            }
+        } else if (uri.scheme == "file") {
+            uri.path?.let { p ->
+                name = File(p).name
+            }
+        }
+        return name
     }
 
     data class VideoDimensions(val widthPx: Int, val heightPx: Int)

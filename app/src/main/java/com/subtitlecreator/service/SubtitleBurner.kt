@@ -56,7 +56,7 @@ class SubtitleBurner(private val context: Context) {
         videoIn: File,
         subtitles: List<Subtitle>,
         videoOut: File,
-        fontSize: Int = 72,
+        fontSize: Int = 48,
         positionFraction: Float = 0.72f,
         colorHex: String = "#FFD400",
         isUppercase: Boolean = false,

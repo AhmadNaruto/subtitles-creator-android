@@ -40,12 +40,16 @@ object PipelineStore {
         val exportDetail: String = "",
         val exportedFile: File? = null,
         val savedUri: Uri? = null,
-        val subtitleFontSize: Int = 50,
+        val subtitleFontSize: Int = 32,
         // Fraction-from-top for the TOP of the subtitle text (0 = very top, 1 = very bottom).
         val subtitlePositionFraction: Float = 0.72f,
         val subtitleColorHex: String = "#FFD400",
         val isUppercase: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val batchItems: List<com.subtitlecreator.model.BatchItem> = emptyList(),
+        val batchRunning: Boolean = false,
+        val batchTargetLanguage: String = "none",
+        val batchCurrentIndex: Int = 0
     )
 
     private val _state = MutableStateFlow(UiState())

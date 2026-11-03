@@ -13,8 +13,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
@@ -23,7 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.subtitlecreator.service.TranslationService
 import com.subtitlecreator.ui.AppViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,18 +36,26 @@ import com.subtitlecreator.ui.AppViewModel
 fun HomeScreen(
     state: com.subtitlecreator.ui.UiState,
     vm: AppViewModel,
-    onStartTranscribe: () -> Unit
+    onStartTranscribe: () -> Unit,
+    onStartBatch: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showModelDialog by remember { mutableStateOf(false) }
     var showAddCustomDialog by remember { mutableStateOf(false) }
     var customUrlInput by remember { mutableStateOf("") }
     var customNameInput by remember { mutableStateOf("") }
+    var selectedModeTab by remember { mutableStateOf(if (state.batchRunning || state.batchItems.isNotEmpty()) 1 else 0) }
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let(vm::onVideoPicked)
+    }
+
+    val multiVideoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        vm.onMultipleVideosPicked(uris)
     }
 
     val modelFilePicker = rememberLauncherForActivityResult(
@@ -165,104 +178,383 @@ fun HomeScreen(
             }
         }
 
-        // 2. Video Card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.VideoLibrary, null)
-                    Text("Pilih Video", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        state.videoFile?.name ?: "Belum ada video yang dipilih",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (state.videoFile != null && state.videoWidthPx > 0 && state.videoHeightPx > 0) {
-                        val isVertical = state.videoHeightPx >= state.videoWidthPx
-                        Text(
-                            text = "${state.videoWidthPx} × ${state.videoHeightPx} • ${if (isVertical) "📱 Orientasi Vertikal (Portrait)" else "🖥️ Orientasi Horizontal (Landscape)"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = {
-                        videoPicker.launch(
-                            androidx.activity.result.PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.VideoOnly
-                            )
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (state.videoFile == null) "Pilih Video dari Galeri" else "Ganti Video")
-                }
-            }
-        }
-
-        // 3. Language Selector Card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Bahasa Audio Sumber",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "Memilih bahasa secara manual membuat transkripsi lebih cepat (~20%) dan mencegah halusinasi deteksi bahasa.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                val languages = listOf(
-                    "auto" to "🌐 Otomatis",
-                    "id" to "🇮🇩 Indonesia",
-                    "en" to "🇬🇧 English",
-                    "ja" to "🇯🇵 日本語",
-                    "ar" to "🇸🇦 العربية",
-                    "ko" to "🇰🇷 한국어",
-                    "zh" to "🇨🇳 中文",
-                    "ms" to "🇲🇾 Melayu",
-                    "es" to "🇪🇸 Español",
-                    "fr" to "🇫🇷 Français",
-                    "de" to "🇩🇪 Deutsch",
-                    "ru" to "🇷🇺 Русский"
-                )
-
+        // Banner jika Batch sedang berjalan
+        if (state.batchRunning) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onStartBatch() }
+            ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    languages.forEach { (code, label) ->
-                        FilterChip(
-                            selected = state.sourceLanguage == code,
-                            onClick = { vm.setSourceLanguage(code) },
-                            label = { Text(label) }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("⚡ Antrean Batch Sedang Berjalan", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Memproses video ${state.batchCurrentIndex + 1} dari ${state.batchItems.size}",
+                            style = MaterialTheme.typography.bodySmall
                         )
+                    }
+                    Button(onClick = onStartBatch) {
+                        Text("Lihat")
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        Button(
-            onClick = onStartTranscribe,
-            enabled = state.modelReady && state.videoFile != null && !state.transcribing,
-            modifier = Modifier.fillMaxWidth().height(56.dp)
+        // Mode Switcher (Single Video vs Batch Antrean)
+        TabRow(
+            selectedTabIndex = selectedModeTab,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(12.dp)
         ) {
-            Text("Mulai Transkripsi Video", style = MaterialTheme.typography.titleMedium)
+            Tab(
+                selected = selectedModeTab == 0,
+                onClick = { selectedModeTab = 0 },
+                text = { Text("Video Tunggal") },
+                icon = { Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(20.dp)) }
+            )
+            Tab(
+                selected = selectedModeTab == 1,
+                onClick = { selectedModeTab = 1 },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Batch Antrean")
+                        if (state.batchItems.isNotEmpty()) {
+                            Badge { Text("${state.batchItems.size}") }
+                        }
+                    }
+                },
+                icon = { Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(20.dp)) }
+            )
+        }
+
+        if (selectedModeTab == 0) {
+            // MODE VIDEO TUNGGAL
+
+            // 2. Video Card
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.Default.VideoLibrary, null)
+                        Text("Pilih Video", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            state.videoFile?.name ?: "Belum ada video yang dipilih",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (state.videoFile != null && state.videoWidthPx > 0 && state.videoHeightPx > 0) {
+                            val isVertical = state.videoHeightPx >= state.videoWidthPx
+                            Text(
+                                text = "${state.videoWidthPx} × ${state.videoHeightPx} • ${if (isVertical) "📱 Orientasi Vertikal (Portrait)" else "🖥️ Orientasi Horizontal (Landscape)"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            videoPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.VideoOnly
+                                )
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (state.videoFile == null) "Pilih Video dari Galeri" else "Ganti Video")
+                    }
+                }
+            }
+
+            // 3. Language Selector Card
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Bahasa Audio Sumber",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Memilih bahasa secara manual membuat transkripsi lebih cepat (~20%) dan mencegah halusinasi deteksi bahasa.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val languages = listOf(
+                        "auto" to "🌐 Otomatis",
+                        "id" to "🇮🇩 Indonesia",
+                        "en" to "🇬🇧 English",
+                        "ja" to "🇯🇵 日本語",
+                        "ar" to "🇸🇦 العربية",
+                        "ko" to "🇰🇷 한국어",
+                        "zh" to "🇨🇳 中文",
+                        "ms" to "🇲🇾 Melayu",
+                        "es" to "🇪🇸 Español",
+                        "fr" to "🇫🇷 Français",
+                        "de" to "🇩🇪 Deutsch",
+                        "ru" to "🇷🇺 Русский"
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        languages.forEach { (code, label) ->
+                            FilterChip(
+                                selected = state.sourceLanguage == code,
+                                onClick = { vm.setSourceLanguage(code) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = onStartTranscribe,
+                enabled = state.modelReady && state.videoFile != null && !state.transcribing,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Text("Mulai Transkripsi Video", style = MaterialTheme.typography.titleMedium)
+            }
+
+        } else {
+            // MODE BATCH ANTREAN
+
+            // 1. Batch Video Selector Card
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.VideoLibrary, null)
+                            Text(
+                                "Antrean Video (${state.batchItems.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        if (state.batchItems.isNotEmpty() && !state.batchRunning) {
+                            TextButton(onClick = { vm.clearBatch() }) {
+                                Text("Kosongkan", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+
+                    if (state.batchItems.isEmpty()) {
+                        Text(
+                            text = "Belum ada video di antrean. Anda dapat memilih beberapa video sekaligus dari galeri untuk diproses secara otomatis berurutan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            state.batchItems.forEachIndexed { idx, item ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "${idx + 1}. ${item.displayName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (!state.batchRunning) {
+                                            IconButton(
+                                                onClick = { vm.removeBatchItem(item.id) },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DeleteOutline,
+                                                    contentDescription = "Hapus",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            multiVideoPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.VideoOnly
+                                )
+                            )
+                        },
+                        enabled = !state.batchRunning,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("+ Tambah Video (Pilih Banyak dari Galeri)")
+                    }
+                }
+            }
+
+            // 2. Audio Source Language Selector
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Bahasa Audio Sumber",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Pilih bahasa percakapan dalam video agar deteksi Whisper lebih akurat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val languages = listOf(
+                        "auto" to "🌐 Otomatis",
+                        "id" to "🇮🇩 Indonesia",
+                        "en" to "🇬🇧 English",
+                        "ja" to "🇯🇵 日本語",
+                        "ar" to "🇸🇦 العربية",
+                        "ko" to "🇰🇷 한국어",
+                        "zh" to "🇨🇳 中文",
+                        "ms" to "🇲🇾 Melayu",
+                        "es" to "🇪🇸 Español",
+                        "fr" to "🇫🇷 Français",
+                        "de" to "🇩🇪 Deutsch",
+                        "ru" to "🇷🇺 Русский"
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        languages.forEach { (code, label) ->
+                            FilterChip(
+                                selected = state.sourceLanguage == code,
+                                onClick = { vm.setSourceLanguage(code) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Batch Target Translation Language Selector
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Terjemahan Otomatis (Opsional)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Otomatis menerjemahkan subtitle ke bahasa target untuk setiap video dalam antrean sebelum disimpan ke galeri.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = state.batchTargetLanguage == "none",
+                            onClick = { vm.setBatchTargetLanguage("none") },
+                            label = { Text("🚫 Tanpa Terjemahan (Asli)") }
+                        )
+
+                        TranslationService.SUPPORTED_LANGUAGES.forEach { lang ->
+                            FilterChip(
+                                selected = state.batchTargetLanguage == lang.code,
+                                onClick = { vm.setBatchTargetLanguage(lang.code) },
+                                label = { Text("${lang.flag} ${lang.name}") }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4. Batch Info Note
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "⚡ Format Output MKV Super Cepat",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Setiap video batch akan dimuxing ke format MKV menggunakan FFmpeg Stream-Copy (hanya 2-5 detik per video) dengan soft subtitle, menjaga kualitas video asli 100% dan langsung tersimpan di folder Movies/SubtitlesCreator di Galeri.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    vm.startBatchProcess()
+                    onStartBatch()
+                },
+                enabled = state.modelReady && state.batchItems.isNotEmpty() && !state.batchRunning,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Text(
+                    text = if (state.batchItems.isEmpty()) "Tambahkan Video ke Antrean" else "Mulai Proses Batch (${state.batchItems.size} Video)",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
         }
 
         state.error?.let { err ->

@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.subtitlecreator.model.BatchStatus
 import com.subtitlecreator.jni.WhisperLib
 import com.subtitlecreator.util.FileUtils
 import kotlinx.coroutines.CoroutineScope
@@ -33,6 +34,7 @@ class PipelineService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val whisper = WhisperService()
+    private val translator = TranslationService()
     private lateinit var ffmpeg: FFmpegService
     private lateinit var burner: SubtitleBurner
     private lateinit var modelDl: ModelDownloadService
@@ -59,6 +61,10 @@ class PipelineService : Service() {
             ACTION_EXPORT     -> startExport(
                 videoPath = intent.getStringExtra(EXTRA_VIDEO_PATH) ?: return stopAndReturn(),
                 exportType = intent.getStringExtra(EXTRA_EXPORT_TYPE) ?: EXPORT_TYPE_MP4
+            )
+            ACTION_BATCH_START -> startBatch(
+                language = intent.getStringExtra(EXTRA_LANGUAGE),
+                targetLanguage = intent.getStringExtra(EXTRA_TARGET_LANGUAGE)
             )
             ACTION_CANCEL     -> cancelActive()
         }
@@ -266,8 +272,8 @@ class PipelineService : Service() {
                 } else {
                     val cur = PipelineStore.current()
                     val fontSize = cur.subtitleFontSize
-                    val baseHeight = orientation.displayHeight.takeIf { it > 0 } ?: cur.videoHeightPx.takeIf { it > 0 } ?: 1080
-                    val pxSize = ((fontSize * 2f) * (baseHeight / 1080f)).toInt().coerceIn(36, 600)
+                    val baseDim = orientation.displayWidth.takeIf { it > 0 } ?: 1080
+                    val pxSize = (fontSize * (baseDim / 1080f) * 1.5f).toInt().coerceIn(24, 150)
                     burner.burn(
                         videoIn = video,
                         subtitles = subs,
@@ -307,6 +313,188 @@ class PipelineService : Service() {
         }
     }
 
+    private fun startBatch(language: String? = null, targetLanguage: String? = null) {
+        if (activeJob?.isActive == true) return
+        activeJob = scope.launch {
+            acquireWakeLock()
+            PipelineStore.update { it.copy(batchRunning = true, error = null) }
+            try {
+                val spec = modelDl.getModelById(PipelineStore.current().selectedModelId)
+                updateNotification("Memuat model Whisper...", 0)
+                whisper.ensureLoaded(modelDl.modelFile(spec))
+
+                val cpuCores = Runtime.getRuntime().availableProcessors()
+                val optimalThreads = when {
+                    cpuCores >= 8 -> 4
+                    cpuCores in 6..7 -> 4
+                    cpuCores in 4..5 -> (cpuCores - 1).coerceAtLeast(2)
+                    else -> 2
+                }
+
+                val chosenLang = language ?: PipelineStore.current().sourceLanguage
+                val targetLang = targetLanguage ?: PipelineStore.current().batchTargetLanguage
+
+                val totalCount = PipelineStore.current().batchItems.size
+                for (index in 0 until totalCount) {
+                    val currentItem = PipelineStore.current().batchItems.getOrNull(index) ?: break
+                    if (currentItem.status == BatchStatus.COMPLETED) continue
+
+                    PipelineStore.update {
+                        it.copy(
+                            batchCurrentIndex = index,
+                            batchItems = it.batchItems.mapIndexed { idx, item ->
+                                if (idx == index) item.copy(status = BatchStatus.EXTRACTING, stageDetail = "Mengekstrak audio (FFmpeg)...", progress = 0)
+                                else item
+                            }
+                        )
+                    }
+                    updateNotification("Batch (${index + 1}/$totalCount): ${currentItem.displayName} - Audio", 0)
+
+                    val video = currentItem.file
+                    val wav = File(video.parentFile, "${video.nameWithoutExtension}_temp.wav")
+                    var outMkv: File? = null
+
+                    try {
+                        // 1. Ekstraksi audio
+                        ffmpeg.extractAudio16kMono(video, wav)
+
+                        // 2. Transkripsi Whisper AI
+                        PipelineStore.update {
+                            it.copy(
+                                batchItems = it.batchItems.mapIndexed { idx, item ->
+                                    if (idx == index) item.copy(status = BatchStatus.TRANSCRIBING, stageDetail = "Mentranskripsi Whisper AI...")
+                                    else item
+                                }
+                            )
+                        }
+
+                        val result = whisper.transcribe(
+                            wav16kMono = wav,
+                            language = chosenLang,
+                            nThreads = optimalThreads,
+                            useVad = true,
+                            onStatusUpdate = { status ->
+                                PipelineStore.update { st ->
+                                    st.copy(
+                                        batchItems = st.batchItems.mapIndexed { idx, item ->
+                                            if (idx == index) item.copy(stageDetail = status) else item
+                                        }
+                                    )
+                                }
+                            },
+                            onProgress = { p ->
+                                PipelineStore.update { st ->
+                                    st.copy(
+                                        batchItems = st.batchItems.mapIndexed { idx, item ->
+                                            if (idx == index) item.copy(progress = p) else item
+                                        }
+                                    )
+                                }
+                                updateNotification("Batch (${index + 1}/$totalCount): Whisper $p%", p)
+                            }
+                        )
+
+                        runCatching { if (wav.exists()) wav.delete() }
+
+                        var finalSubs = result.subtitles
+
+                        // 3. Terjemahan (opsional)
+                        if (!targetLang.isNullOrBlank() && targetLang != "none") {
+                            PipelineStore.update {
+                                it.copy(
+                                    batchItems = it.batchItems.mapIndexed { idx, item ->
+                                        if (idx == index) item.copy(status = BatchStatus.TRANSLATING, stageDetail = "Menerjemahkan bahasa...")
+                                        else item
+                                    }
+                                )
+                            }
+                            updateNotification("Batch (${index + 1}/$totalCount): Menerjemahkan...", 50)
+                            finalSubs = translator.translateSubtitles(
+                                subtitles = finalSubs,
+                                targetLang = targetLang,
+                                onProgress = { curr, tot ->
+                                    val pct = if (tot > 0) (curr * 100 / tot) else 0
+                                    PipelineStore.update { st ->
+                                        st.copy(
+                                            batchItems = st.batchItems.mapIndexed { idx, item ->
+                                                if (idx == index) item.copy(progress = pct, stageDetail = "Menerjemahkan $curr/$tot baris...") else item
+                                            }
+                                        )
+                                    }
+                                }
+                            )
+                        }
+
+                        // 4. Muxing soft subtitle ke MKV (Fast stream-copy)
+                        PipelineStore.update {
+                            it.copy(
+                                batchItems = it.batchItems.mapIndexed { idx, item ->
+                                    if (idx == index) item.copy(status = BatchStatus.MUXING, stageDetail = "Muxing MKV softsub...")
+                                    else item
+                                }
+                            )
+                        }
+                        updateNotification("Batch (${index + 1}/$totalCount): Muxing MKV...", 85)
+
+                        val outputDir = File(applicationContext.filesDir, "output").apply { mkdirs() }
+                        val baseName = currentItem.displayName.substringBeforeLast(".")
+                        outMkv = File(outputDir, "${baseName}_subtitled.mkv")
+
+                        ffmpeg.embedSrtToMkv(videoIn = video, subtitles = finalSubs, mkvOut = outMkv)
+
+                        // 5. Simpan ke Galeri
+                        FileUtils.saveToGallery(applicationContext, outMkv, outMkv.name)
+
+                        PipelineStore.update {
+                            it.copy(
+                                batchItems = it.batchItems.mapIndexed { idx, item ->
+                                    if (idx == index) item.copy(
+                                        status = BatchStatus.COMPLETED,
+                                        progress = 100,
+                                        stageDetail = "Selesai & tersimpan di Galeri!",
+                                        outputFile = outMkv
+                                    ) else item
+                                }
+                            )
+                        }
+
+                    } catch (t: Throwable) {
+                        if (t is java.util.concurrent.CancellationException || t is kotlinx.coroutines.CancellationException || t.message?.contains("cancel", ignoreCase = true) == true) {
+                            throw t
+                        }
+                        Log.e(TAG, "Batch item ${currentItem.displayName} error", t)
+                        PipelineStore.update {
+                            it.copy(
+                                batchItems = it.batchItems.mapIndexed { idx, item ->
+                                    if (idx == index) item.copy(
+                                        status = BatchStatus.FAILED,
+                                        stageDetail = "Gagal: ${t.message}",
+                                        error = t.message
+                                    ) else item
+                                }
+                            )
+                        }
+                    } finally {
+                        runCatching { if (wav.exists()) wav.delete() }
+                    }
+                }
+
+                updateNotification("Semua proses batch selesai!", 100)
+            } catch (t: Throwable) {
+                if (t is java.util.concurrent.CancellationException || t is kotlinx.coroutines.CancellationException || t.message?.contains("cancel", ignoreCase = true) == true) {
+                    Log.i(TAG, "Batch dibatalkan oleh pengguna")
+                } else {
+                    Log.e(TAG, "Batch process error", t)
+                    PipelineStore.update { it.copy(error = "Batch error: ${t.message}") }
+                }
+            } finally {
+                PipelineStore.update { it.copy(batchRunning = false) }
+                releaseWakeLock()
+                stopSelf()
+            }
+        }
+    }
+
     private fun cancelActive() {
         WhisperLib.cancel()
         activeJob?.cancel()
@@ -314,6 +502,7 @@ class PipelineService : Service() {
             it.copy(
                 transcribing = false,
                 exporting = false,
+                batchRunning = false,
                 transcribeProgress = 0,
                 exportProgress = 0
             )
@@ -389,10 +578,12 @@ class PipelineService : Service() {
         const val ACTION_DOWNLOAD = "com.subtitlecreator.ACTION_DOWNLOAD"
         const val ACTION_TRANSCRIBE = "com.subtitlecreator.ACTION_TRANSCRIBE"
         const val ACTION_EXPORT = "com.subtitlecreator.ACTION_EXPORT"
+        const val ACTION_BATCH_START = "com.subtitlecreator.ACTION_BATCH_START"
         const val ACTION_CANCEL = "com.subtitlecreator.ACTION_CANCEL"
         const val EXTRA_VIDEO_PATH = "videoPath"
         const val EXTRA_MODEL_ID = "modelId"
         const val EXTRA_LANGUAGE = "language"
+        const val EXTRA_TARGET_LANGUAGE = "targetLanguage"
         const val EXTRA_EXPORT_TYPE = "exportType"
         const val EXPORT_TYPE_MP4 = "mp4"
         const val EXPORT_TYPE_MKV = "mkv"

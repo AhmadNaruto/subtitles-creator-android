@@ -19,6 +19,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.subtitlecreator.ui.AppViewModel
+import com.subtitlecreator.ui.screens.BatchProgressScreen
 import com.subtitlecreator.ui.screens.EditorScreen
 import com.subtitlecreator.ui.screens.ExportScreen
 import com.subtitlecreator.ui.screens.HomeScreen
@@ -58,6 +59,7 @@ private object Routes {
     const val TRANSCRIBING = "transcribing"
     const val EDITOR = "editor"
     const val EXPORT = "export"
+    const val BATCH_PROGRESS = "batch_progress"
 }
 
 @androidx.compose.runtime.Composable
@@ -67,10 +69,28 @@ fun AppNav(vm: AppViewModel) {
 
     NavHost(navController = nav, startDestination = Routes.HOME) {
         composable(Routes.HOME) {
-            HomeScreen(state = state, vm = vm, onStartTranscribe = {
-                vm.startTranscription()
-                nav.navigate(Routes.TRANSCRIBING)
-            })
+            HomeScreen(
+                state = state,
+                vm = vm,
+                onStartTranscribe = {
+                    vm.startTranscription()
+                    nav.navigate(Routes.TRANSCRIBING)
+                },
+                onStartBatch = {
+                    nav.navigate(Routes.BATCH_PROGRESS)
+                }
+            )
+        }
+        composable(Routes.BATCH_PROGRESS) {
+            BatchProgressScreen(
+                state = state,
+                vm = vm,
+                onBackToHome = {
+                    nav.navigate(Routes.HOME) {
+                        popUpTo(Routes.HOME) { inclusive = false }
+                    }
+                }
+            )
         }
         composable(Routes.TRANSCRIBING) {
             TranscribingScreen(

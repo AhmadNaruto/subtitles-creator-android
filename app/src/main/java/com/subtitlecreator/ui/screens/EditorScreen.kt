@@ -166,7 +166,7 @@ fun EditorScreen(
                     Pair(containerWidth, containerWidth / videoAspect)
                 }
 
-                val fontSizeSp = (state.subtitleFontSize * 0.35f).coerceIn(14f, 56f).sp
+                val fontSizeSp = (state.subtitleFontSize * 0.42f).coerceIn(10f, 32f).sp
                 val shadowRadiusPx = with(density) { (fontSizeSp * 0.10f).toPx() }
                 val shadowDxPx = with(density) { (fontSizeSp * 0.035f).toPx() }
                 val shadowDyPx = with(density) { (fontSizeSp * 0.065f).toPx() }
@@ -354,7 +354,7 @@ fun EditorScreen(
                     Slider(
                         value = state.subtitleFontSize.toFloat(),
                         onValueChange = { vm.setFontSize(it.toInt()) },
-                        valueRange = 32f..180f,
+                        valueRange = 16f..64f,
                         modifier = Modifier.weight(1f)
                     )
                     Text("${state.subtitleFontSize}", style = MaterialTheme.typography.labelSmall)

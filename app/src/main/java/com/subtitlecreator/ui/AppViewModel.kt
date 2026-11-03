@@ -267,7 +267,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setFontSize(size: Int) {
-        PipelineStore.update { it.copy(subtitleFontSize = size.coerceIn(24, 200)) }
+        PipelineStore.update { it.copy(subtitleFontSize = size.coerceIn(16, 80)) }
     }
 
     fun setSubtitlePosition(fraction: Float) {
@@ -282,6 +282,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         PipelineStore.update { it.copy(isUppercase = enabled) }
     }
 
+    fun onMultipleVideosPicked(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val items = uris.mapIndexed { idx, uri ->
+                val displayName = FileUtils.getFileName(app, uri)
+                val safeName = "batch_${System.currentTimeMillis()}_$idx.mp4"
+                val file = FileUtils.copyUriToAppStorage(app, uri, safeName, cleanOld = false)
+                com.subtitlecreator.model.BatchItem(
+                    file = file,
+                    displayName = displayName
+                )
+            }
+            PipelineStore.update { it.copy(batchItems = it.batchItems + items) }
+        }
+    }
+
+    fun removeBatchItem(id: String) {
+        PipelineStore.update { st ->
+            st.copy(batchItems = st.batchItems.filter { it.id != id })
+        }
+    }
+
+    fun clearBatch() {
+        PipelineStore.update {
+            it.copy(batchItems = emptyList(), batchCurrentIndex = 0)
+        }
+    }
+
+    fun setBatchTargetLanguage(lang: String) {
+        PipelineStore.update { it.copy(batchTargetLanguage = lang) }
+    }
+
+    fun startBatchProcess() {
+        if (state.value.batchItems.isEmpty()) return
+        startService(
+            action = PipelineService.ACTION_BATCH_START,
+            language = state.value.sourceLanguage,
+            targetLanguage = state.value.batchTargetLanguage
+        )
+    }
+
     fun clearError() = PipelineStore.update { it.copy(error = null) }
 
     private fun startService(
@@ -289,6 +331,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         videoPath: String? = null,
         modelId: String? = null,
         language: String? = null,
+        targetLanguage: String? = null,
         exportType: String? = null
     ) {
         val app = getApplication<Application>()
@@ -297,6 +340,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             videoPath?.let { putExtra(PipelineService.EXTRA_VIDEO_PATH, it) }
             modelId?.let { putExtra(PipelineService.EXTRA_MODEL_ID, it) }
             language?.let { putExtra(PipelineService.EXTRA_LANGUAGE, it) }
+            targetLanguage?.let { putExtra(PipelineService.EXTRA_TARGET_LANGUAGE, it) }
             exportType?.let { putExtra(PipelineService.EXTRA_EXPORT_TYPE, it) }
         }
         ContextCompat.startForegroundService(app, intent)
